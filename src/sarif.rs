@@ -185,3 +185,83 @@ pub struct Replacement {
 pub struct ArtifactContent {
     pub text: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LOG: &str = r#"{
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "CodeSonar",
+                "rules": [
+                    {"id": "LANG.MEM.NPD", "name": "Null Pointer Dereference",
+                     "fullDescription": {"text": "A null pointer is dereferenced."},
+                     "defaultConfiguration": {"level": "error"}},
+                    {"id": "LANG.MEM.BO", "name": "Buffer Overrun"}
+                ]
+            }},
+            "originalUriBaseIds": {"SRCROOT": {"uri": "file:///build/"}},
+            "results": [
+                {"ruleId": "LANG.MEM.BO", "ruleIndex": 1,
+                 "message": {"text": "Buffer overrun"},
+                 "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": "src/main.c", "uriBaseId": "SRCROOT"},
+                    "region": {"startLine": 3, "startColumn": 5}}}],
+                 "unknownField": true},
+                {"rule": {"id": "LANG.MEM.NPD"}, "level": "warning",
+                 "message": {"text": "Null pointer"}}
+            ]
+        }]
+    }"#;
+
+    #[test]
+    fn parses_codesonar_log() {
+        let log = Log::from_json(LOG).unwrap();
+        let run = &log.runs[0];
+        assert_eq!(run.tool.driver.name, "CodeSonar");
+        assert_eq!(run.results.len(), 2);
+        assert_eq!(
+            run.original_uri_base_ids["SRCROOT"].uri.as_deref(),
+            Some("file:///build/")
+        );
+
+        let region = run.results[0].locations[0]
+            .physical_location
+            .as_ref()
+            .and_then(|p| p.region)
+            .unwrap();
+        assert_eq!(region.start_line, Some(3));
+        assert_eq!(region.start_column, Some(5));
+        assert_eq!(region.end_line, None);
+        assert_eq!(run.results[1].level, Some(Level::Warning));
+    }
+
+    #[test]
+    fn finds_rule_by_index_and_id() {
+        let log = Log::from_json(LOG).unwrap();
+        let run = &log.runs[0];
+        assert_eq!(run.rule_for(&run.results[0]).unwrap().id, "LANG.MEM.BO");
+        assert_eq!(run.rule_for(&run.results[1]).unwrap().id, "LANG.MEM.NPD");
+    }
+
+    #[test]
+    fn prefers_markdown_message() {
+        let message = MultiformatMessage {
+            text: "plain".into(),
+            markdown: Some("**md**".into()),
+        };
+        assert_eq!(message.best(), "**md**");
+        let message = MultiformatMessage {
+            text: "plain".into(),
+            markdown: None,
+        };
+        assert_eq!(message.best(), "plain");
+    }
+
+    #[test]
+    fn rejects_invalid_json() {
+        assert!(Log::from_json("not json").is_err());
+    }
+}
