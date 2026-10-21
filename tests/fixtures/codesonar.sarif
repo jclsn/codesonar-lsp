@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeSonar",
+          "rules": [
+            {
+              "id": "LANG.MEM.NPD",
+              "name": "Null Pointer Dereference",
+              "shortDescription": { "text": "Null Pointer Dereference" },
+              "fullDescription": { "text": "A null pointer is dereferenced." },
+              "help": {
+                "text": "Check pointers before use.",
+                "markdown": "Check pointers **before** use."
+              },
+              "helpUri": "https://hub.example.com:7340/doc/LANG.MEM.NPD.html",
+              "defaultConfiguration": { "level": "error" }
+            },
+            {
+              "id": "MISC.FMT",
+              "name": "Format String"
+            }
+          ]
+        }
+      },
+      "originalUriBaseIds": {
+        "SRCROOT": { "uri": "file:///build/" }
+      },
+      "results": [
+        {
+          "ruleId": "LANG.MEM.NPD",
+          "ruleIndex": 0,
+          "message": { "text": "Null pointer dereference of 'p'" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/main.c", "uriBaseId": "SRCROOT" },
+                "region": { "startLine": 5, "startColumn": 5, "endLine": 5, "endColumn": 7 }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/main.c", "uriBaseId": "SRCROOT" },
+                "region": { "startLine": 3 }
+              },
+              "message": { "text": "'p' is set to NULL" }
+            }
+          ],
+          "hostedViewerUri": "https://hub.example.com:7340/warninginstance/12.html",
+          "fixes": [
+            {
+              "description": { "text": "Check 'p' for NULL" },
+              "artifactChanges": [
+                {
+                  "artifactLocation": { "uri": "src/main.c", "uriBaseId": "SRCROOT" },
+                  "replacements": [
+                    {
+                      "deletedRegion": { "startLine": 5, "startColumn": 5, "endLine": 5, "endColumn": 5 },
+                      "insertedContent": { "text": "if (p) " }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "MISC.FMT",
+          "level": "note",
+          "message": { "text": "Format string is not a literal" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/util%20file.c", "uriBaseId": "SRCROOT" },
+                "region": { "startLine": 10 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "MISC.FMT",
+          "message": { "text": "Outside of the workspace" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "file:///usr/include/stdio.h" }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "MISC.FMT",
+          "message": { "text": "Without location" }
+        }
+      ]
+    }
+  ]
+}
