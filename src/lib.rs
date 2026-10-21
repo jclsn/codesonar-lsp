@@ -3,6 +3,7 @@
 pub mod code_action;
 pub mod config;
 pub mod hover;
+pub mod hub;
 pub mod sarif;
 pub mod store;
 pub mod warning;
