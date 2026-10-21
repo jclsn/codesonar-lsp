@@ -51,6 +51,10 @@ impl Client {
     }
 
     fn initialize(root: &Path, options: Value) -> Self {
+        Self::initialize_with(root, options, json!({}))
+    }
+
+    fn initialize_with(root: &Path, options: Value, capabilities: Value) -> Self {
         let mut client = Self::start();
         let root = Url::from_file_path(root).unwrap();
         let result = client.request(
@@ -58,7 +62,7 @@ impl Client {
             json!({
                 "processId": null,
                 "rootUri": root,
-                "capabilities": {},
+                "capabilities": capabilities,
                 "initializationOptions": options,
             }),
         );
@@ -281,5 +285,43 @@ fn reports_invalid_source_after_configuration_change() {
     let message = client.expect("window/showMessage", |p| p["type"] == 1);
     let text = message["message"].as_str().unwrap();
     assert!(text.contains("missing.sarif"), "{text}");
+    client.shutdown();
+}
+
+#[test]
+fn reloads_when_sarif_file_changes() {
+    let dir = workspace();
+    let capabilities =
+        json!({"workspace": {"didChangeWatchedFiles": {"dynamicRegistration": true}}});
+    let mut client = Client::initialize_with(dir.path(), options(dir.path()), capabilities);
+
+    let registration = client.expect("client/registerCapability", |_| true);
+    let registration = &registration["registrations"][0];
+    assert_eq!(registration["method"], "workspace/didChangeWatchedFiles");
+    assert_eq!(
+        registration["registerOptions"]["watchers"][0]["globPattern"],
+        "**/*.sarif"
+    );
+
+    let main = uri(dir.path().join("src/main.c"));
+    client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+
+    let mut log: Value = serde_json::from_str(FIXTURE).unwrap();
+    log["runs"][0]["results"].as_array_mut().unwrap().remove(0);
+    let sarif = dir.path().join("codesonar.sarif");
+    std::fs::write(&sarif, log.to_string()).unwrap();
+
+    // Changes to other files are ignored.
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": uri(dir.path().join("other.sarif")), "type": 2}]}),
+    );
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": uri(&sarif), "type": 2}]}),
+    );
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] == json!([])
+    });
     client.shutdown();
 }
