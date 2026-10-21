@@ -74,3 +74,133 @@ impl Hub {
         Ok(self.base.join(path.trim_start_matches('/'))?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{body_string_contains, header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    const FIXTURE: &str = include_str!("../tests/fixtures/codesonar.sarif");
+
+    fn config(server: &MockServer, prefix: &str) -> HubConfig {
+        HubConfig {
+            url: format!("{}{prefix}", server.uri()),
+            analysis_id: "7".into(),
+            ..HubConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn fetches_sarif_anonymously() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/analysis/7-allwarnings.sarif"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(FIXTURE))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let log = Hub::new(&config(&server, ""))
+            .unwrap()
+            .fetch_sarif()
+            .await
+            .unwrap();
+        assert_eq!(log.runs[0].results.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn signs_in_and_keeps_session() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/cs/sign_in.html"))
+            .and(query_param("response_try_plaintext", "1"))
+            .and(body_string_contains("sif_username=alice"))
+            .and(body_string_contains("sif_password=secret"))
+            .respond_with(
+                ResponseTemplate::new(200).insert_header("set-cookie", "sessionid=abc; Path=/"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/cs/analysis/7-allwarnings.sarif"))
+            .and(header("cookie", "sessionid=abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(FIXTURE))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = HubConfig {
+            username: Some("alice".into()),
+            password: Some("secret".into()),
+            ..config(&server, "/cs")
+        };
+        let log = Hub::new(&config).unwrap().fetch_sarif().await.unwrap();
+        assert_eq!(log.runs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reports_failed_sign_in() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/sign_in.html"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+
+        let config = HubConfig {
+            username: Some("alice".into()),
+            password: Some("wrong".into()),
+            ..config(&server, "")
+        };
+        let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
+        assert!(error.to_string().contains("sign in failed"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn reports_http_and_parse_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/analysis/7-allwarnings.sarif"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/analysis/8-allwarnings.sarif"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<html>"))
+            .mount(&server)
+            .await;
+
+        let error = Hub::new(&config(&server, ""))
+            .unwrap()
+            .fetch_sarif()
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("404"), "{error}");
+
+        let config = HubConfig {
+            analysis_id: "8".into(),
+            ..config(&server, "")
+        };
+        let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
+        assert!(error.to_string().contains("invalid SARIF"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_settings() {
+        let config = HubConfig {
+            url: "not a url".into(),
+            ..HubConfig::default()
+        };
+        assert!(Hub::new(&config).is_err());
+
+        let config = HubConfig {
+            url: "https://hub".into(),
+            ca_certificate: Some("/does/not/exist.pem".into()),
+            ..HubConfig::default()
+        };
+        assert!(Hub::new(&config).is_err());
+    }
+}
