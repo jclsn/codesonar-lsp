@@ -5,5 +5,6 @@ pub mod config;
 pub mod hover;
 pub mod hub;
 pub mod sarif;
+pub mod source;
 pub mod store;
 pub mod warning;
