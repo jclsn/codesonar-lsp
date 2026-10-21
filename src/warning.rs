@@ -241,3 +241,160 @@ pub fn to_range(region: Region) -> Range {
     };
     Range::new(Position::new(start_line, start_char), end)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::PathMapping;
+
+    const FIXTURE: &str = include_str!("../tests/fixtures/codesonar.sarif");
+
+    fn config() -> Config {
+        Config {
+            path_mappings: vec![PathMapping {
+                from: "/build".into(),
+                to: "/ws".into(),
+            }],
+            ..Config::default()
+        }
+    }
+
+    fn warnings() -> Vec<Warning> {
+        let log = Log::from_json(FIXTURE).unwrap();
+        from_log(&log, &config(), Some(Path::new("/ws")))
+    }
+
+    fn url(path: &str) -> Url {
+        Url::from_file_path(path).unwrap()
+    }
+
+    #[test]
+    fn converts_results() {
+        let warnings = warnings();
+        assert_eq!(warnings.len(), 3, "result without location is skipped");
+
+        let npd = &warnings[0];
+        assert_eq!(npd.uri, url("/ws/src/main.c"));
+        assert_eq!(
+            npd.range,
+            Range::new(Position::new(4, 4), Position::new(4, 6))
+        );
+        assert_eq!(npd.severity, DiagnosticSeverity::ERROR);
+        assert_eq!(npd.rule_id.as_deref(), Some("LANG.MEM.NPD"));
+        assert_eq!(npd.rule_name.as_deref(), Some("Null Pointer Dereference"));
+        assert_eq!(
+            npd.description.as_deref(),
+            Some("Check pointers **before** use.")
+        );
+        assert_eq!(
+            npd.hub_uri.as_ref().unwrap().as_str(),
+            "https://hub.example.com:7340/warninginstance/12.html"
+        );
+
+        let fmt = &warnings[1];
+        assert_eq!(fmt.uri, url("/ws/src/util file.c"));
+        assert_eq!(fmt.severity, DiagnosticSeverity::INFORMATION);
+        assert_eq!(fmt.description, None);
+
+        assert_eq!(warnings[2].uri, url("/usr/include/stdio.h"));
+        assert_eq!(warnings[2].severity, DiagnosticSeverity::WARNING);
+    }
+
+    #[test]
+    fn converts_related_locations() {
+        let related = &warnings()[0].related;
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].message, "'p' is set to NULL");
+        assert_eq!(related[0].location.uri, url("/ws/src/main.c"));
+        assert_eq!(related[0].location.range.start, Position::new(2, 0));
+    }
+
+    #[test]
+    fn converts_fixes() {
+        let fixes = &warnings()[0].fixes;
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0].title, "Check 'p' for NULL");
+        let edits = &fixes[0].changes[&url("/ws/src/main.c")];
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "if (p) ");
+        assert_eq!(edits[0].range.start, edits[0].range.end);
+        assert_eq!(edits[0].range.start, Position::new(4, 4));
+    }
+
+    #[test]
+    fn drops_fixes_without_regions() {
+        let log = Log::from_json(
+            r#"{"runs": [{"results": [{
+                "message": {"text": "m"},
+                "locations": [{"physicalLocation": {"artifactLocation": {"uri": "a.c"}}}],
+                "fixes": [{"artifactChanges": [{
+                    "artifactLocation": {"uri": "a.c"},
+                    "replacements": [{"deletedRegion": {"charOffset": 3}}]
+                }]}]
+            }]}]}"#,
+        )
+        .unwrap();
+        let warnings = from_log(&log, &Config::default(), Some(Path::new("/ws")));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fixes.is_empty());
+        assert!(from_log(&log, &Config::default(), None).is_empty());
+    }
+
+    #[test]
+    fn keeps_absolute_paths_without_root() {
+        let log = Log::from_json(FIXTURE).unwrap();
+        let warnings = from_log(&log, &Config::default(), None);
+        assert!(warnings.iter().all(|w| w.uri.scheme() == "file"));
+        assert_eq!(warnings.len(), 3);
+        assert_eq!(warnings[0].uri, url("/build/src/main.c"));
+    }
+
+    #[test]
+    fn builds_diagnostics() {
+        let diagnostic = warnings()[0].to_diagnostic();
+        assert_eq!(diagnostic.source.as_deref(), Some(SOURCE));
+        assert_eq!(
+            diagnostic.code,
+            Some(NumberOrString::String("LANG.MEM.NPD".into()))
+        );
+        assert_eq!(
+            diagnostic.code_description.unwrap().href.as_str(),
+            "https://hub.example.com:7340/doc/LANG.MEM.NPD.html"
+        );
+        assert_eq!(diagnostic.message, "Null pointer dereference of 'p'");
+        assert_eq!(diagnostic.related_information.unwrap().len(), 1);
+
+        let diagnostic = warnings()[1].to_diagnostic();
+        assert_eq!(diagnostic.code_description, None);
+        assert_eq!(diagnostic.related_information, None);
+    }
+
+    #[test]
+    fn converts_regions() {
+        let region = |start_line, start_column, end_line, end_column| Region {
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        };
+        let range = |a, b, c, d| Range::new(Position::new(a, b), Position::new(c, d));
+
+        assert_eq!(
+            to_range(region(Some(3), None, None, None)),
+            range(2, 0, 3, 0)
+        );
+        assert_eq!(
+            to_range(region(Some(3), Some(2), Some(4), Some(9))),
+            range(2, 1, 3, 8)
+        );
+        assert_eq!(
+            to_range(region(Some(5), None, Some(1), None)),
+            range(4, 0, 5, 0)
+        );
+        assert_eq!(to_range(Region::default()), range(0, 0, 1, 0));
+        assert_eq!(
+            to_range(region(Some(0), Some(0), None, Some(0))),
+            range(0, 0, 0, 0)
+        );
+    }
+}
