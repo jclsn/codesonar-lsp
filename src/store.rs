@@ -55,3 +55,74 @@ impl Store {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tower_lsp::lsp_types::DiagnosticSeverity;
+
+    use super::*;
+
+    fn warning(path: &str, start: (u32, u32), end: (u32, u32)) -> Warning {
+        Warning {
+            uri: Url::from_file_path(path).unwrap(),
+            range: Range::new(Position::new(start.0, start.1), Position::new(end.0, end.1)),
+            severity: DiagnosticSeverity::WARNING,
+            message: format!("{path} {start:?}"),
+            rule_id: None,
+            rule_name: None,
+            description: None,
+            help_uri: None,
+            hub_uri: None,
+            related: Vec::new(),
+            fixes: Vec::new(),
+        }
+    }
+
+    fn store() -> Store {
+        Store::new(vec![
+            warning("/a.c", (1, 0), (2, 0)),
+            warning("/a.c", (5, 3), (5, 8)),
+            warning("/b.c", (0, 0), (0, 0)),
+        ])
+    }
+
+    fn uri(path: &str) -> Url {
+        Url::from_file_path(path).unwrap()
+    }
+
+    #[test]
+    fn groups_by_file() {
+        let store = store();
+        assert_eq!(store.len(), 3);
+        assert!(!store.is_empty());
+        assert_eq!(store.files().count(), 2);
+        assert_eq!(store.get(&uri("/a.c")).len(), 2);
+        assert!(store.get(&uri("/c.c")).is_empty());
+        assert!(Store::default().is_empty());
+    }
+
+    #[test]
+    fn finds_warnings_at_position() {
+        let store = store();
+        let a = uri("/a.c");
+        assert_eq!(store.at(&a, Position::new(1, 0)).len(), 1);
+        assert_eq!(store.at(&a, Position::new(1, 40)).len(), 1);
+        assert!(
+            store.at(&a, Position::new(2, 0)).is_empty(),
+            "end is exclusive"
+        );
+        assert_eq!(store.at(&a, Position::new(5, 5)).len(), 1);
+        assert!(store.at(&a, Position::new(5, 9)).is_empty());
+        assert_eq!(store.at(&uri("/b.c"), Position::new(0, 0)).len(), 1);
+    }
+
+    #[test]
+    fn finds_overlapping_warnings() {
+        let store = store();
+        let a = uri("/a.c");
+        let range = |a, b, c, d| Range::new(Position::new(a, b), Position::new(c, d));
+        assert_eq!(store.overlapping(&a, range(0, 0, 9, 0)).len(), 2);
+        assert_eq!(store.overlapping(&a, range(5, 0, 5, 3)).len(), 1);
+        assert!(store.overlapping(&a, range(3, 0, 4, 0)).is_empty());
+    }
+}
