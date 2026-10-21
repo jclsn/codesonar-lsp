@@ -61,3 +61,86 @@ pub fn explanation(warning: &Warning) -> String {
     }
     parts.join("\n\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::config::{Config, PathMapping};
+    use crate::sarif::Log;
+    use crate::warning;
+
+    fn store() -> Store {
+        let log = Log::from_json(include_str!("../tests/fixtures/codesonar.sarif")).unwrap();
+        let config = Config {
+            path_mappings: vec![PathMapping {
+                from: "/build".into(),
+                to: "/ws".into(),
+            }],
+            ..Config::default()
+        };
+        Store::new(warning::from_log(&log, &config, Some(Path::new("/ws"))))
+    }
+
+    fn markdown(hover: Hover) -> String {
+        match hover.contents {
+            HoverContents::Markup(content) => {
+                assert_eq!(content.kind, MarkupKind::Markdown);
+                content.value
+            }
+            other => panic!("unexpected contents: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explains_warning_with_details() {
+        let store = store();
+        let uri = Url::from_file_path("/ws/src/main.c").unwrap();
+        let hover = hover(&store, &uri, Position::new(4, 5)).unwrap();
+        assert_eq!(hover.range, Some(store.get(&uri)[0].range));
+
+        let text = markdown(hover);
+        assert!(text.starts_with("**CodeSonar: Null Pointer Dereference** (`LANG.MEM.NPD`)"));
+        assert!(text.contains("Null pointer dereference of 'p'"));
+        assert!(text.contains("Check pointers **before** use."));
+        assert!(text.contains("- main.c:3: 'p' is set to NULL"));
+        assert!(text.contains(
+            "[Documentation](https://hub.example.com:7340/doc/LANG.MEM.NPD.html) · \
+             [Open in CodeSonar Hub](https://hub.example.com:7340/warninginstance/12.html)"
+        ));
+    }
+
+    #[test]
+    fn explains_warning_without_details() {
+        let store = store();
+        let uri = Url::from_file_path("/ws/src/util file.c").unwrap();
+        let text = markdown(hover(&store, &uri, Position::new(9, 0)).unwrap());
+        assert_eq!(
+            text,
+            "**CodeSonar: Format String** (`MISC.FMT`)\n\nFormat string is not a literal"
+        );
+    }
+
+    #[test]
+    fn returns_nothing_outside_warnings() {
+        let store = store();
+        let uri = Url::from_file_path("/ws/src/main.c").unwrap();
+        assert!(hover(&store, &uri, Position::new(0, 0)).is_none());
+        let other = Url::from_file_path("/ws/other.c").unwrap();
+        assert!(hover(&store, &other, Position::new(4, 5)).is_none());
+    }
+
+    #[test]
+    fn joins_multiple_warnings() {
+        let mut warnings: Vec<_> = store()
+            .get(&Url::from_file_path("/ws/src/main.c").unwrap())
+            .to_vec();
+        warnings.push(warnings[0].clone());
+        let store = Store::new(warnings);
+        let uri = Url::from_file_path("/ws/src/main.c").unwrap();
+        let hover = hover(&store, &uri, Position::new(4, 5)).unwrap();
+        assert_eq!(hover.range, None);
+        assert_eq!(markdown(hover).matches("\n\n---\n\n").count(), 1);
+    }
+}
