@@ -2,4 +2,5 @@
 
 pub mod config;
 pub mod sarif;
+pub mod store;
 pub mod warning;
