@@ -1,0 +1,790 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeSonar",
+          "rules": [
+            {
+              "id": "LANG.ARITH.DIVZERO",
+              "name": "Division By Zero",
+              "shortDescription": {
+                "text": "Division By Zero"
+              },
+              "fullDescription": {
+                "text": "The divisor of a division or modulo operation can be zero."
+              },
+              "help": {
+                "text": "Dividing by zero is undefined behavior in C. Make sure the divisor is not zero before dividing, for example with an explicit check.",
+                "markdown": "Dividing by zero is **undefined behavior** in C. Make sure the divisor is not zero before dividing, for example with an explicit check."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "LANG.STRUCT.RPL",
+              "name": "Return Pointer To Local",
+              "shortDescription": {
+                "text": "Return Pointer To Local"
+              },
+              "fullDescription": {
+                "text": "A function returns the address of a local variable."
+              },
+              "help": {
+                "text": "The lifetime of a local variable ends when the function returns, so the returned pointer is dangling. Return the value itself, use a caller-provided buffer, or allocate on the heap.",
+                "markdown": "The lifetime of a local variable ends when the function returns, so the returned pointer is **dangling**. Return the value itself, use a caller-provided buffer, or allocate on the heap."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "IO.INJ.FMT",
+              "name": "Format String Injection",
+              "shortDescription": {
+                "text": "Format String Injection"
+              },
+              "fullDescription": {
+                "text": "Data that may be controlled by the user is used as a format string."
+              },
+              "help": {
+                "text": "If the format string contains conversion specifiers like %s or %n, printf reads or writes arbitrary memory. Always use a constant format string: printf(\"%s\", name).",
+                "markdown": "If the format string contains conversion specifiers like `%s` or `%n`, `printf` reads or writes arbitrary memory. Always use a constant format string: `printf(\"%s\", name)`."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "BADFUNC.GETS",
+              "name": "Use of gets",
+              "shortDescription": {
+                "text": "Use of gets"
+              },
+              "fullDescription": {
+                "text": "The function gets is used."
+              },
+              "help": {
+                "text": "gets cannot limit the number of characters it reads and always allows a buffer overrun. It was removed in C11. Use fgets(buffer, sizeof(buffer), stdin) instead.",
+                "markdown": "`gets` cannot limit the number of characters it reads and always allows a **buffer overrun**. It was removed in C11. Use `fgets(buffer, sizeof(buffer), stdin)` instead."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "ALLOC.UAF",
+              "name": "Use After Free",
+              "shortDescription": {
+                "text": "Use After Free"
+              },
+              "fullDescription": {
+                "text": "Memory is accessed after it has been freed."
+              },
+              "help": {
+                "text": "After free, the memory may be reused for other data. Reading or writing it is undefined behavior and a common source of security vulnerabilities.",
+                "markdown": "After `free`, the memory may be reused for other data. Reading or writing it is **undefined behavior** and a common source of security vulnerabilities."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "ALLOC.DF",
+              "name": "Double Free",
+              "shortDescription": {
+                "text": "Double Free"
+              },
+              "fullDescription": {
+                "text": "Memory is freed twice."
+              },
+              "help": {
+                "text": "Freeing the same pointer twice corrupts the heap and can be exploited. Set pointers to NULL after freeing them or make sure each allocation is freed exactly once.",
+                "markdown": "Freeing the same pointer twice corrupts the heap and can be exploited. Set pointers to `NULL` after freeing them or make sure each allocation is freed exactly once."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "LANG.STRUCT.CONDASSIG",
+              "name": "Assignment In Conditional",
+              "shortDescription": {
+                "text": "Assignment In Conditional"
+              },
+              "fullDescription": {
+                "text": "An assignment is used as the condition of an if statement."
+              },
+              "help": {
+                "text": "This is often a typo for ==. If the assignment is intended, make it explicit: if ((x = parse_number(input)) != 0).",
+                "markdown": "This is often a typo for `==`. If the assignment is intended, make it explicit: `if ((x = parse_number(input)) != 0)`."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "LANG.STRUCT.EBS",
+              "name": "Empty Loop Body",
+              "shortDescription": {
+                "text": "Empty Loop Body"
+              },
+              "fullDescription": {
+                "text": "A for loop has an empty body."
+              },
+              "help": {
+                "text": "The semicolon directly after the loop header makes the loop body empty. This is often unintended. If it is intended, write an empty block {} to make that clear.",
+                "markdown": "The semicolon directly after the loop header makes the loop body empty. This is often unintended. If it is intended, write an empty block `{}` to make that clear."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "LANG.MEM.NPD",
+              "name": "Null Pointer Dereference",
+              "shortDescription": {
+                "text": "Null Pointer Dereference"
+              },
+              "fullDescription": {
+                "text": "A pointer that can be NULL is dereferenced."
+              },
+              "help": {
+                "text": "Dereferencing a null pointer is undefined behavior and usually crashes the program. Check the pointer before use.",
+                "markdown": "Dereferencing a null pointer is **undefined behavior** and usually crashes the program. Check the pointer before use."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "ALLOC.LEAK",
+              "name": "Leak",
+              "shortDescription": {
+                "text": "Leak"
+              },
+              "fullDescription": {
+                "text": "Allocated memory is not freed."
+              },
+              "help": {
+                "text": "Memory that is allocated but never freed is lost until the program exits. Free each allocation when it is no longer needed.",
+                "markdown": "Memory that is allocated but never freed is lost until the program exits. Free each allocation when it is no longer needed."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "LANG.STRUCT.GOTO",
+              "name": "Use of goto",
+              "shortDescription": {
+                "text": "Use of goto"
+              },
+              "fullDescription": {
+                "text": "A goto statement is used."
+              },
+              "help": {
+                "text": "goto makes the control flow hard to follow. Prefer structured control flow such as loops, break and early returns.",
+                "markdown": "`goto` makes the control flow hard to follow. Prefer structured control flow such as loops, `break` and early returns."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "endTimeUtc": "2026-10-22T10:00:00Z"
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "LANG.ARITH.DIVZERO",
+          "ruleIndex": 0,
+          "message": {
+            "text": "Division by zero: b is 0 when called from main"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 12,
+                  "endLine": 9,
+                  "endColumn": 17
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/1.html",
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 45,
+                  "startColumn": 20,
+                  "endLine": 45,
+                  "endColumn": 33
+                }
+              },
+              "message": {
+                "text": "divide is called with b = 0"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "LANG.STRUCT.RPL",
+          "ruleIndex": 1,
+          "message": {
+            "text": "Returning the address of local variable 'local'"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 16,
+                  "startColumn": 12,
+                  "endLine": 16,
+                  "endColumn": 18
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/2.html",
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 9,
+                  "endLine": 14,
+                  "endColumn": 14
+                }
+              },
+              "message": {
+                "text": "'local' is declared here"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "IO.INJ.FMT",
+          "ruleIndex": 2,
+          "message": {
+            "text": "Format string 'name' comes from argv[1]"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 29,
+                  "startColumn": 16,
+                  "endLine": 29,
+                  "endColumn": 20
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/3.html",
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 28,
+                  "startColumn": 25,
+                  "endLine": 28,
+                  "endColumn": 32
+                }
+              },
+              "message": {
+                "text": "tainted data enters here"
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Use a constant format string"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "main.c"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 29,
+                        "startColumn": 9,
+                        "endLine": 29,
+                        "endColumn": 21
+                      },
+                      "insertedContent": {
+                        "text": "printf(\"%s\", name)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "BADFUNC.GETS",
+          "ruleIndex": 3,
+          "message": {
+            "text": "Use of gets"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 32,
+                  "startColumn": 5,
+                  "endLine": 32,
+                  "endColumn": 9
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/4.html",
+          "fixes": [
+            {
+              "description": {
+                "text": "Replace gets with fgets"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "main.c"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 32,
+                        "startColumn": 5,
+                        "endLine": 32,
+                        "endColumn": 16
+                      },
+                      "insertedContent": {
+                        "text": "fgets(input, sizeof(input), stdin)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "ALLOC.UAF",
+          "ruleIndex": 4,
+          "message": {
+            "text": "'dup' is used after it was freed"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 36,
+                  "startColumn": 20,
+                  "endLine": 36,
+                  "endColumn": 23
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/5.html",
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 34,
+                  "startColumn": 17,
+                  "endLine": 34,
+                  "endColumn": 33
+                }
+              },
+              "message": {
+                "text": "memory is allocated here"
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 35,
+                  "startColumn": 5,
+                  "endLine": 35,
+                  "endColumn": 14
+                }
+              },
+              "message": {
+                "text": "memory is freed here"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ALLOC.DF",
+          "ruleIndex": 5,
+          "message": {
+            "text": "'dup' is freed twice"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 37,
+                  "startColumn": 5,
+                  "endLine": 37,
+                  "endColumn": 14
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/6.html",
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 35,
+                  "startColumn": 5,
+                  "endLine": 35,
+                  "endColumn": 14
+                }
+              },
+              "message": {
+                "text": "first free"
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Remove the second free"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "main.c"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 37,
+                        "startColumn": 1,
+                        "endLine": 38,
+                        "endColumn": 1
+                      },
+                      "insertedContent": {
+                        "text": ""
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "LANG.STRUCT.CONDASSIG",
+          "ruleIndex": 6,
+          "message": {
+            "text": "Assignment 'x = parse_number(input)' used as condition"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 39,
+                  "startColumn": 9,
+                  "endLine": 39,
+                  "endColumn": 32
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/7.html",
+          "fixes": [
+            {
+              "description": {
+                "text": "Compare the assignment explicitly"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "main.c"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 39,
+                        "startColumn": 9,
+                        "endLine": 39,
+                        "endColumn": 32
+                      },
+                      "insertedContent": {
+                        "text": "(x = parse_number(input)) != 0"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "LANG.STRUCT.EBS",
+          "ruleIndex": 7,
+          "message": {
+            "text": "The body of this for loop is empty"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 42,
+                  "startColumn": 30,
+                  "endLine": 42,
+                  "endColumn": 31
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/8.html",
+          "fixes": [
+            {
+              "description": {
+                "text": "Use an explicit empty block"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "main.c"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 42,
+                        "startColumn": 30,
+                        "endLine": 42,
+                        "endColumn": 31
+                      },
+                      "insertedContent": {
+                        "text": " {}"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "LANG.MEM.NPD",
+          "ruleIndex": 8,
+          "message": {
+            "text": "Null pointer dereference of 'ptr'"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 49,
+                  "startColumn": 9,
+                  "endLine": 49,
+                  "endColumn": 13
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/9.html",
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 23,
+                  "startColumn": 10,
+                  "endLine": 23,
+                  "endColumn": 20
+                }
+              },
+              "message": {
+                "text": "'ptr' is set to NULL here"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "LANG.MEM.NPD",
+          "ruleIndex": 8,
+          "message": {
+            "text": "'leak' may be NULL because malloc can fail"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 53,
+                  "startColumn": 5,
+                  "endLine": 53,
+                  "endColumn": 12
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/10.html",
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 52,
+                  "startColumn": 17,
+                  "endLine": 52,
+                  "endColumn": 42
+                }
+              },
+              "message": {
+                "text": "malloc may return NULL"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ALLOC.LEAK",
+          "ruleIndex": 9,
+          "message": {
+            "text": "Memory allocated for 'leak' is never freed"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 52,
+                  "startColumn": 17,
+                  "endLine": 52,
+                  "endColumn": 42
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/11.html",
+          "fixes": [
+            {
+              "description": {
+                "text": "Free 'leak' before leaving main"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "main.c"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 55,
+                        "startColumn": 5,
+                        "endLine": 55,
+                        "endColumn": 5
+                      },
+                      "insertedContent": {
+                        "text": "free(leak);\n    "
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "LANG.STRUCT.GOTO",
+          "ruleIndex": 10,
+          "message": {
+            "text": "Use of goto"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.c"
+                },
+                "region": {
+                  "startLine": 55,
+                  "startColumn": 5,
+                  "endLine": 55,
+                  "endColumn": 9
+                }
+              }
+            }
+          ],
+          "hostedViewerUri": "http://nas:7340/warninginstance/12.html"
+        }
+      ]
+    }
+  ]
+}
