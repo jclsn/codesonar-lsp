@@ -82,6 +82,20 @@ name = "c"
 language-servers = ["clangd", "codesonar"]
 ```
 
+## Demo
+
+`examples/demo` contains a C file with typical defects and a matching
+SARIF file in the CodeSonar format. Open the folder in your editor with
+this setting:
+
+```json
+{ "sarifFile": "codesonar.sarif" }
+```
+
+After changes to `main.c`, regenerate the SARIF file with
+`python3 gen_sarif.py main.c codesonar.sarif`. The hub links in the file
+are placeholders and only work with a matching analysis.
+
 ## Development
 
 ```sh
