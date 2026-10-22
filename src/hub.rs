@@ -202,11 +202,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reports_sign_in_without_session() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/session/create-basic-auth/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+
+        let config = HubConfig {
+            username: Some("alice".into()),
+            ..config(&server, "")
+        };
+        let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
+        assert!(format!("{error:#}").contains("no session"), "{error:#}");
+    }
+
+    #[tokio::test]
     async fn reports_http_and_parse_errors() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/analysis/7-allwarnings.sarif"))
-            .respond_with(ResponseTemplate::new(404))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Analysis 7 not found"))
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -222,6 +239,7 @@ mod tests {
             .unwrap_err();
         let error = format!("{error:#}");
         assert!(error.contains("404"), "{error}");
+        assert!(error.contains("Analysis 7 not found"), "{error}");
 
         let config = HubConfig {
             analysis_id: "8".into(),
