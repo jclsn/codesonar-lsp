@@ -2,6 +2,8 @@
 
 A language server that shows CodeSonar warnings directly in the editor.
 
+**!!! Very basic WIP version. Not functional yet !!!**
+
 ## Features
 
 - **Diagnostics** for every CodeSonar warning, including severity, warning class
