@@ -14,9 +14,11 @@ pub struct Store {
 impl Store {
     pub fn new(warnings: Vec<Warning>) -> Self {
         let mut files: HashMap<Url, Vec<Warning>> = HashMap::new();
+
         for warning in warnings {
             files.entry(warning.uri.clone()).or_default().push(warning);
         }
+
         Self { files }
     }
 
@@ -120,7 +122,9 @@ mod tests {
     fn finds_overlapping_warnings() {
         let store = store();
         let a = uri("/a.c");
+
         let range = |a, b, c, d| Range::new(Position::new(a, b), Position::new(c, d));
+
         assert_eq!(store.overlapping(&a, range(0, 0, 9, 0)).len(), 2);
         assert_eq!(store.overlapping(&a, range(5, 0, 5, 3)).len(), 1);
         assert!(store.overlapping(&a, range(3, 0, 4, 0)).is_empty());

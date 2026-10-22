@@ -56,6 +56,7 @@ impl Backend {
                     .await;
                 Store::default()
             }
+
             Err(error) => {
                 self.client
                     .show_message(MessageType::ERROR, format!("CodeSonar: {error:#}"))
@@ -74,12 +75,15 @@ impl Backend {
         let count = store.len();
         {
             let mut state = self.state.write().await;
+
             let current: HashSet<&Url> = store.files().map(|(uri, _)| uri).collect();
+
             for (uri, _) in state.store.files() {
                 if !current.contains(uri) {
                     diagnostics.push((uri.clone(), Vec::new()));
                 }
             }
+
             state.store = store;
         }
 
@@ -88,6 +92,7 @@ impl Backend {
                 .publish_diagnostics(uri, diagnostics, None)
                 .await;
         }
+
         self.client
             .log_message(
                 MessageType::INFO,
@@ -108,6 +113,7 @@ impl Backend {
             method: "workspace/didChangeWatchedFiles".to_string(),
             register_options: serde_json::to_value(options).ok(),
         };
+
         if let Err(error) = self.client.register_capability(vec![registration]).await {
             self.client
                 .log_message(
@@ -124,6 +130,7 @@ impl Backend {
             .and_then(Value::as_str)
             .and_then(|uri| Url::parse(uri).ok())
             .ok_or_else(|| Error::invalid_params("expected a warning URL"))?;
+
         self.client
             .show_document(ShowDocumentParams {
                 uri,
@@ -143,8 +150,10 @@ impl LanguageServer for Backend {
             Some(options) => {
                 Config::from_value(options).map_err(|e| Error::invalid_params(e.to_string()))?
             }
+
             None => Config::default(),
         };
+
         let can_watch_files = params
             .capabilities
             .workspace
@@ -184,6 +193,7 @@ impl LanguageServer for Backend {
         if self.state.read().await.can_watch_files {
             self.watch_files().await;
         }
+
         self.reload().await;
     }
 
@@ -197,6 +207,7 @@ impl LanguageServer for Backend {
         let Some(settings) = params.settings.get("codesonar") else {
             return;
         };
+
         let config = match Config::from_value(settings) {
             Ok(config) => config,
             Err(error) => {
@@ -209,13 +220,17 @@ impl LanguageServer for Backend {
                 return;
             }
         };
+
         {
             let mut state = self.state.write().await;
+
             if state.config == config {
                 return;
             }
+
             state.config = config;
         }
+
         self.reload().await;
     }
 
@@ -224,13 +239,16 @@ impl LanguageServer for Backend {
             let state = self.state.read().await;
             state.config.sarif_file(state.root.as_deref())
         };
+
         let Some(sarif_file) = sarif_file else {
             return;
         };
+
         let changed = params
             .changes
             .iter()
             .any(|change| change.uri.to_file_path().ok().as_ref() == Some(&sarif_file));
+
         if changed {
             self.reload().await;
         }
@@ -261,6 +279,7 @@ impl LanguageServer for Backend {
                 return Err(Error::invalid_params(format!("unknown command {command}")));
             }
         }
+
         Ok(None)
     }
 }

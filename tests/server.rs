@@ -34,6 +34,7 @@ impl Client {
         let (sender, messages) = mpsc::channel();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
+
             while let Some(message) = read_message(&mut reader) {
                 if sender.send(message).is_err() {
                     break;
@@ -85,9 +86,11 @@ impl Client {
         let id = self.next_id;
         self.next_id += 1;
         let mut request = json!({"jsonrpc": "2.0", "id": id, "method": method});
+
         if !params.is_null() {
             request["params"] = params;
         }
+
         self.send(request);
         let response =
             self.wait_for(|message| message["id"] == id && message.get("method").is_none());
@@ -106,19 +109,23 @@ impl Client {
         if let Some(index) = self.pending.iter().position(&predicate) {
             return self.pending.remove(index);
         }
+
         loop {
             let message = self
                 .messages
                 .recv_timeout(TIMEOUT)
                 .expect("timed out waiting for the server");
             // Answer requests from the server, like window/showDocument.
+
             if message.get("method").is_some() && message.get("id").is_some() {
                 let id = message["id"].clone();
                 self.send(json!({"jsonrpc": "2.0", "id": id, "result": {"success": true}}));
             }
+
             if predicate(&message) {
                 return message;
             }
+
             self.pending.push(message);
         }
     }
@@ -134,19 +141,25 @@ impl Client {
 
 fn read_message(reader: &mut impl BufRead) -> Option<Value> {
     let mut length = None;
+
     loop {
         let mut line = String::new();
+
         if reader.read_line(&mut line).ok()? == 0 {
             return None;
         }
+
         let line = line.trim_end();
+
         if line.is_empty() {
             break;
         }
+
         if let Some(value) = line.strip_prefix("Content-Length: ") {
             length = value.parse().ok();
         }
     }
+
     let mut body = vec![0; length?];
     reader.read_exact(&mut body).ok()?;
     serde_json::from_slice(&body).ok()

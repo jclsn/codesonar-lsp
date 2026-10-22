@@ -58,14 +58,17 @@ impl Warning {
 /// Results whose file cannot be resolved to a local path are skipped.
 pub fn from_log(log: &Log, config: &Config, root: Option<&Path>) -> Vec<Warning> {
     let mut warnings = Vec::new();
+
     for run in &log.runs {
         let resolver = Resolver { run, config, root };
+
         for result in &run.results {
             if let Some(warning) = resolver.warning(result) {
                 warnings.push(warning);
             }
         }
     }
+
     warnings
 }
 
@@ -141,8 +144,10 @@ impl Resolver<'_> {
     /// so that no partial edit is ever applied.
     fn fix(&self, fix: &sarif::Fix) -> Option<QuickFix> {
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
         for change in &fix.artifact_changes {
             let uri = self.uri(&change.artifact_location)?;
+
             for replacement in &change.replacements {
                 replacement.deleted_region.start_line?;
                 let new_text = replacement
@@ -156,9 +161,11 @@ impl Resolver<'_> {
                 });
             }
         }
+
         if changes.is_empty() {
             return None;
         }
+
         let title = fix
             .description
             .as_ref()
@@ -169,6 +176,7 @@ impl Resolver<'_> {
 
     fn uri(&self, location: &ArtifactLocation) -> Option<Url> {
         let reference = self.reference(location, 0)?;
+        let artifact_uri = location.uri.as_deref().unwrap_or_default();
         let path = match reference.strip_prefix("file:") {
             // Skip the authority of `file://host/path`.
             Some(rest) => match rest.strip_prefix("//") {
@@ -180,11 +188,45 @@ impl Resolver<'_> {
         let path = percent_decode_str(path).decode_utf8().ok()?;
         let path = self.config.map_path(&path);
         let path = Path::new(&path);
+
         if path.is_absolute() {
-            Url::from_file_path(path).ok()
-        } else {
-            Url::from_file_path(self.root?.join(path)).ok()
+            return self.absolute_uri(path, artifact_uri);
         }
+
+        Url::from_file_path(self.root?.join(path)).ok()
+    }
+
+    fn absolute_uri(&self, path: &Path, artifact_uri: &str) -> Option<Url> {
+        if path.exists() {
+            return Url::from_file_path(path).ok();
+        }
+
+        if let Some(workspace_uri) = self.workspace_uri(artifact_uri) {
+            return Some(workspace_uri);
+        }
+
+        Url::from_file_path(path).ok()
+    }
+
+    /// Resolves a relative SARIF artifact against the workspace.
+    fn workspace_uri(&self, artifact_uri: &str) -> Option<Url> {
+        if artifact_uri.is_empty() {
+            return None;
+        }
+
+        if Path::new(artifact_uri).is_absolute() {
+            return None;
+        }
+
+        let root = self.root?;
+        let artifact_uri = percent_decode_str(artifact_uri).decode_utf8().ok()?;
+        let workspace_path = root.join(artifact_uri.as_ref());
+
+        if !workspace_path.exists() {
+            return None;
+        }
+
+        Url::from_file_path(workspace_path).ok()
     }
 
     /// Builds the full URI reference by following `uriBaseId` chains.
@@ -197,13 +239,17 @@ impl Resolver<'_> {
         let Some(base) = self.run.original_uri_base_ids.get(base_id) else {
             return Some(uri);
         };
+
         if depth > 8 {
             return None;
         }
+
         let mut base = self.reference(base, depth + 1)?;
+
         if !base.is_empty() && !base.ends_with('/') {
             base.push('/');
         }
+
         Some(base + &uri)
     }
 }
@@ -298,6 +344,53 @@ mod tests {
 
         assert_eq!(warnings[2].uri, url("/usr/include/stdio.h"));
         assert_eq!(warnings[2].severity, DiagnosticSeverity::WARNING);
+    }
+
+    #[test]
+    fn resolves_unavailable_analysis_root_against_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("src")).unwrap();
+        std::fs::write(root.path().join("src/main.c"), "").unwrap();
+        let log = Log::from_json(
+            r#"
+            {
+                "runs": [
+                    {
+                        "originalUriBaseIds": {
+                            "SRCROOT": {
+                                "uri": "file:///builds/agent/project/"
+                            }
+                        },
+                        "results": [
+                            {
+                                "message": { "text": "warning" },
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {
+                                                "uri": "src/main.c",
+                                                "uriBaseId": "SRCROOT"
+                                            },
+                                            "region": { "startLine": 2 }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let warnings = from_log(&log, &Config::default(), Some(root.path()));
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].uri,
+            Url::from_file_path(root.path().join("src/main.c")).unwrap()
+        );
     }
 
     #[test]

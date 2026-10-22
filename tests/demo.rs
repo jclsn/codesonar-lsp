@@ -36,12 +36,15 @@ fn offset(text: &str, position: Position) -> usize {
 fn apply(text: &str, edits: &[TextEdit]) -> String {
     let mut text = text.to_string();
     let mut edits = edits.to_vec();
+
     edits.sort_by_key(|edit| std::cmp::Reverse(edit.range.start));
+
     for edit in edits {
         let start = offset(&text, edit.range.start);
         let end = offset(&text, edit.range.end);
         text.replace_range(start..end, &edit.new_text);
     }
+
     text
 }
 
@@ -66,6 +69,7 @@ async fn warnings_point_at_the_code() {
 
     let warnings = warnings().await;
     assert_eq!(warnings.len(), expected.len());
+
     for (warning, (rule, snippet)) in warnings.iter().zip(expected) {
         assert_eq!(warning.uri, main);
         assert_eq!(warning.rule_id.as_deref(), Some(rule));

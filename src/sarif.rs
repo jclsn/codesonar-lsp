@@ -31,10 +31,13 @@ impl Run {
         let index = result
             .rule_index
             .or_else(|| result.rule.as_ref().and_then(|r| r.index));
+
         if let Some(rule) = index.and_then(|i| rules.get(i)) {
             return Some(rule);
         }
+
         let id = result.rule_id()?;
+
         rules.iter().find(|rule| rule.id == id)
     }
 }
