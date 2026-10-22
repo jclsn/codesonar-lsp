@@ -1,7 +1,9 @@
 //! Client for the CodeSonar hub web API.
 
 use anyhow::{Context, bail};
-use reqwest::{Certificate, Client, Url};
+use reqwest::header::ACCEPT;
+use reqwest::{Certificate, Client, RequestBuilder, Response, Url};
+use serde::Deserialize;
 
 use crate::config::HubConfig;
 use crate::sarif::Log;
@@ -12,6 +14,18 @@ pub struct Hub {
     config: HubConfig,
 }
 
+/// Session returned by `/session/create-basic-auth/`.
+#[derive(Deserialize)]
+struct Session {
+    bearer: String,
+}
+
+/// Error body returned by the hub, e.g. for wrong credentials.
+#[derive(Deserialize)]
+struct HubError {
+    error: String,
+}
+
 impl Hub {
     pub fn new(config: &HubConfig) -> anyhow::Result<Self> {
         let mut base = Url::parse(&config.url).context("invalid hub url")?;
@@ -19,9 +33,8 @@ impl Hub {
             base.set_path(&format!("{}/", base.path()));
         }
 
-        let mut builder = Client::builder()
-            .cookie_store(true)
-            .danger_accept_invalid_certs(config.accept_invalid_certs);
+        let mut builder =
+            Client::builder().danger_accept_invalid_certs(config.accept_invalid_certs);
         if let Some(path) = &config.ca_certificate {
             let pem =
                 std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
@@ -37,37 +50,42 @@ impl Hub {
 
     /// Signs in if credentials are configured and downloads the SARIF export.
     pub async fn fetch_sarif(&self) -> anyhow::Result<Log> {
-        if let Some(username) = &self.config.username {
-            self.sign_in(username, &self.config.password().unwrap_or_default())
-                .await?;
-        }
+        let token = match &self.config.username {
+            Some(username) => {
+                let password = self.config.password().unwrap_or_default();
+                Some(self.sign_in(username, &password).await?)
+            }
+            None => None,
+        };
 
         let url = self.url(&self.config.sarif_path())?;
-        let response = self.client.get(url.clone()).send().await?;
-        if !response.status().is_success() {
-            bail!("hub returned {} for {url}", response.status());
+        let mut request = self.client.get(url.clone());
+        if let Some(token) = &token {
+            request = request.bearer_auth(token);
         }
-        let text = response.text().await?;
+        let text = send(request)
+            .await
+            .with_context(|| format!("cannot download {url}"))?
+            .text()
+            .await?;
         Log::from_json(&text).with_context(|| format!("invalid SARIF from {url}"))
     }
 
-    async fn sign_in(&self, username: &str, password: &str) -> anyhow::Result<()> {
-        let url = self.url("/sign_in.html?response_try_plaintext=1")?;
-        let response = self
+    /// Creates a session with HTTP basic auth, like the hub's sign-in page,
+    /// and returns its bearer token.
+    async fn sign_in(&self, username: &str, password: &str) -> anyhow::Result<String> {
+        let request = self
             .client
-            .post(url)
-            .form(&[
-                ("sif_username", username),
-                ("sif_password", password),
-                ("sif_sign_in", "yes"),
-                ("sif_log_out_competitor", "yes"),
-            ])
-            .send()
-            .await?;
-        if !response.status().is_success() {
-            bail!("hub sign in failed with {}", response.status());
-        }
-        Ok(())
+            .post(self.url("/session/create-basic-auth/")?)
+            .basic_auth(username, Some(password))
+            .header(ACCEPT, "application/json")
+            .form(&[("key", "bearer"), ("pool", "web")]);
+        let response = send(request).await.context("hub sign in failed")?;
+        let session: Session = response
+            .json()
+            .await
+            .context("hub sign in returned no session")?;
+        Ok(session.bearer)
     }
 
     fn url(&self, path: &str) -> anyhow::Result<Url> {
@@ -75,9 +93,27 @@ impl Hub {
     }
 }
 
+/// Sends a request and turns error responses into errors with the hub's message.
+async fn send(request: RequestBuilder) -> anyhow::Result<Response> {
+    let response = request.send().await?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let body = response.text().await.unwrap_or_default();
+    let message = serde_json::from_str::<HubError>(&body)
+        .map(|error| error.error)
+        .unwrap_or(body);
+    let message = message.trim();
+    if message.is_empty() {
+        bail!("{status}");
+    }
+    bail!("{status}: {message}");
+}
+
 #[cfg(test)]
 mod tests {
-    use wiremock::matchers::{body_string_contains, header, method, path, query_param};
+    use wiremock::matchers::{body_string_contains, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -111,22 +147,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn signs_in_and_keeps_session() {
+    async fn signs_in_with_basic_auth() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/cs/sign_in.html"))
-            .and(query_param("response_try_plaintext", "1"))
-            .and(body_string_contains("sif_username=alice"))
-            .and(body_string_contains("sif_password=secret"))
+            .and(path("/cs/session/create-basic-auth/"))
+            // base64 of "alice:secret"
+            .and(header("authorization", "Basic YWxpY2U6c2VjcmV0"))
+            .and(header("accept", "application/json"))
+            .and(body_string_contains("key=bearer"))
             .respond_with(
-                ResponseTemplate::new(200).insert_header("set-cookie", "sessionid=abc; Path=/"),
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{"bearer": "9/token", "user": {"name": "alice"}}"#),
             )
             .expect(1)
             .mount(&server)
             .await;
         Mock::given(method("GET"))
             .and(path("/cs/analysis/7-allwarnings.sarif"))
-            .and(header("cookie", "sessionid=abc"))
+            .and(header("authorization", "Bearer 9/token"))
             .respond_with(ResponseTemplate::new(200).set_body_string(FIXTURE))
             .expect(1)
             .mount(&server)
@@ -145,8 +183,10 @@ mod tests {
     async fn reports_failed_sign_in() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/sign_in.html"))
-            .respond_with(ResponseTemplate::new(403))
+            .and(path("/session/create-basic-auth/"))
+            .respond_with(ResponseTemplate::new(403).set_body_string(
+                r#"{"status":403,"error":"Permission Denied: Invalid user name or password."}"#,
+            ))
             .mount(&server)
             .await;
 
@@ -156,7 +196,9 @@ mod tests {
             ..config(&server, "")
         };
         let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
-        assert!(error.to_string().contains("sign in failed"), "{error}");
+        let error = format!("{error:#}");
+        assert!(error.contains("hub sign in failed"), "{error}");
+        assert!(error.contains("Invalid user name or password"), "{error}");
     }
 
     #[tokio::test]
@@ -178,14 +220,15 @@ mod tests {
             .fetch_sarif()
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("404"), "{error}");
+        let error = format!("{error:#}");
+        assert!(error.contains("404"), "{error}");
 
         let config = HubConfig {
             analysis_id: "8".into(),
             ..config(&server, "")
         };
         let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
-        assert!(error.to_string().contains("invalid SARIF"), "{error}");
+        assert!(format!("{error:#}").contains("invalid SARIF"), "{error:#}");
     }
 
     #[test]

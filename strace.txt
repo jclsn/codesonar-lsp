@@ -1,0 +1,38 @@
+85000 write(2, "start\n", 6)            = 6
+85011 connect(6, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+85011 connect(6, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+85011 connect(6, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, 16) = 0
+85011 recvfrom(6, "6\200\201\200\0\1\0\1\0\1\0\4\3nas\5fritz\3box\0\0\1\0\1\300"..., 2048, 0, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, [28 => 16]) = 144
+85011 recvfrom(6, "w\201\201\200\0\1\0\2\0\1\0\4\3nas\5fritz\3box\0\0\34\0\1\300"..., 65536, 0, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, [28 => 16]) = 184
+85011 sendto(6, [{nlmsg_len=20, nlmsg_type=RTM_GETADDR, nlmsg_flags=NLM_F_REQUEST|NLM_F_DUMP, nlmsg_seq=1792664949, nlmsg_pid=0}, {ifa_family=AF_UNSPEC, ...}], 20, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 20
+85011 connect(6, {sa_family=AF_INET, sin_port=htons(0), sin_addr=inet_addr("192.168.184.28")}, 16) = 0
+85011 connect(6, {sa_family=AF_INET6, sin6_port=htons(0), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "fddc:5ba8:5a10:0:b282:e2ff:fe44:8a52", &sin6_addr), sin6_scope_id=0}, 28) = 0
+85011 connect(6, {sa_family=AF_UNSPEC, sa_data="\0\0\0\0\0\0\0\0\0\0\0\0\0\0"}, 16) = 0
+85011 connect(6, {sa_family=AF_INET6, sin6_port=htons(0), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "2a04:4540:6514:5900:b282:e2ff:fe44:8a52", &sin6_addr), sin6_scope_id=0}, 28) = 0
+85000 connect(6, {sa_family=AF_INET, sin_port=htons(7340), sin_addr=inet_addr("192.168.184.28")}, 16) = -1 EINPROGRESS (Operation now in progress)
+85000 write(4, "\1\0\0\0\0\0\0\0", 8)   = 8
+85001 recvfrom(6, "HTTP/1.1 200 OK\r\nContent-Type: a"..., 8192, 0, NULL, NULL) = 584
+85000 write(4, "\1\0\0\0\0\0\0\0", 8)   = 8
+85006 write(4, "\1\0\0\0\0\0\0\0", 8)   = 8
+85006 write(4, "\1\0\0\0\0\0\0\0", 8)   = 8
+85006 write(4, "\1\0\0\0\0\0\0\0", 8)   = 8
+85001 recvfrom(6, "HTTP/1.1 404 NOT FOUND\r\nContent-"..., 8192, 0, NULL, NULL) = 351
+85000 write(4, "\1\0\0\0\0\0\0\0", 8)   = 8
+85006 write(4, "\1\0\0\0\0\0\0\0", 8 <unfinished ...>
+85000 write(2, "cannot download http://nas.fritz"..., 107 <unfinished ...>
+85006 <... write resumed>)              = 8
+85000 <... write resumed>)              = 107
+85000 write(2, "\n", 1)                 = 1
+85000 write(4, "\1\0\0\0\0\0\0\0", 8)   = 8
+85010 +++ exited with 0 +++
+85009 +++ exited with 0 +++
+85008 +++ exited with 0 +++
+85005 +++ exited with 0 +++
+85002 +++ exited with 0 +++
+85011 +++ exited with 0 +++
+85006 +++ exited with 0 +++
+85004 +++ exited with 0 +++
+85003 +++ exited with 0 +++
+85001 +++ exited with 0 +++
+85007 +++ exited with 0 +++
+85000 +++ exited with 0 +++
