@@ -29,12 +29,14 @@ struct HubError {
 impl Hub {
     pub fn new(config: &HubConfig) -> anyhow::Result<Self> {
         let mut base = Url::parse(&config.url).context("invalid hub url")?;
+
         if !base.path().ends_with('/') {
             base.set_path(&format!("{}/", base.path()));
         }
 
         let mut builder =
             Client::builder().danger_accept_invalid_certs(config.accept_invalid_certs);
+
         if let Some(path) = &config.ca_certificate {
             let pem =
                 std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
@@ -55,19 +57,23 @@ impl Hub {
                 let password = self.config.password().unwrap_or_default();
                 Some(self.sign_in(username, &password).await?)
             }
+
             None => None,
         };
 
         let url = self.url(&self.config.sarif_path())?;
         let mut request = self.client.get(url.clone());
+
         if let Some(token) = &token {
             request = request.bearer_auth(token);
         }
+
         let text = send(request)
             .await
             .with_context(|| format!("cannot download {url}"))?
             .text()
             .await?;
+
         Log::from_json(&text).with_context(|| format!("invalid SARIF from {url}"))
     }
 
@@ -97,17 +103,21 @@ impl Hub {
 async fn send(request: RequestBuilder) -> anyhow::Result<Response> {
     let response = request.send().await?;
     let status = response.status();
+
     if status.is_success() {
         return Ok(response);
     }
+
     let body = response.text().await.unwrap_or_default();
     let message = serde_json::from_str::<HubError>(&body)
         .map(|error| error.error)
         .unwrap_or(body);
     let message = message.trim();
+
     if message.is_empty() {
         bail!("{status}");
     }
+
     bail!("{status}: {message}");
 }
 

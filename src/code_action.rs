@@ -14,8 +14,10 @@ pub const OPEN_IN_HUB_COMMAND: &str = "codesonar.openInHub";
 
 pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
+
     for warning in store.overlapping(uri, range) {
         let diagnostic = warning.to_diagnostic();
+
         for (index, fix) in warning.fixes.iter().enumerate() {
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: fix.title.clone(),
@@ -29,6 +31,7 @@ pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrC
                 ..CodeAction::default()
             }));
         }
+
         if let Some(hub_uri) = &warning.hub_uri {
             let title = format!(
                 "Open {} in CodeSonar Hub",
@@ -47,6 +50,7 @@ pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrC
             }));
         }
     }
+
     actions
 }
 

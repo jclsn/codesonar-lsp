@@ -7,9 +7,11 @@ use crate::warning::Warning;
 
 pub fn hover(store: &Store, uri: &Url, position: Position) -> Option<Hover> {
     let warnings = store.at(uri, position);
+
     if warnings.is_empty() {
         return None;
     }
+
     let value = warnings
         .iter()
         .map(|warning| explanation(warning))
@@ -30,14 +32,17 @@ pub fn explanation(warning: &Warning) -> String {
         "**CodeSonar: {}**",
         warning.rule_name.as_deref().unwrap_or("Warning")
     );
+
     if let Some(id) = &warning.rule_id {
         title.push_str(&format!(" (`{id}`)"));
     }
 
     let mut parts = vec![title, warning.message.clone()];
+
     if let Some(description) = &warning.description {
         parts.push(description.clone());
     }
+
     for related in &warning.related {
         let line = related.location.range.start.line + 1;
         let file = related
@@ -50,15 +55,19 @@ pub fn explanation(warning: &Warning) -> String {
     }
 
     let mut links = Vec::new();
+
     if let Some(uri) = &warning.help_uri {
         links.push(format!("[Documentation]({uri})"));
     }
+
     if let Some(uri) = &warning.hub_uri {
         links.push(format!("[Open in CodeSonar Hub]({uri})"));
     }
+
     if !links.is_empty() {
         parts.push(links.join(" · "));
     }
+
     parts.join("\n\n")
 }
 
@@ -89,6 +98,7 @@ mod tests {
                 assert_eq!(content.kind, MarkupKind::Markdown);
                 content.value
             }
+
             other => panic!("unexpected contents: {other:?}"),
         }
     }

@@ -64,9 +64,11 @@ impl PathMapping {
         let from = normalize(&self.from);
         let from = from.trim_end_matches('/');
         let rest = normalize(path).strip_prefix(from)?.to_string();
+
         if !rest.is_empty() && !rest.starts_with('/') {
             return None;
         }
+
         Some(format!("{}{}", self.to.trim_end_matches(['/', '\\']), rest))
     }
 }
@@ -75,6 +77,7 @@ impl PathMapping {
 pub fn normalize(path: &str) -> String {
     let path = path.replace('\\', "/");
     let bytes = path.as_bytes();
+
     if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
         path[1..].to_string()
     } else {
@@ -86,9 +89,11 @@ impl Config {
     /// Parses settings, which may be nested under a `codesonar` key.
     pub fn from_value(value: &Value) -> anyhow::Result<Self> {
         let value = value.get("codesonar").unwrap_or(value);
+
         if value.is_null() {
             return Ok(Self::default());
         }
+
         Ok(Self::deserialize(value)?)
     }
 
