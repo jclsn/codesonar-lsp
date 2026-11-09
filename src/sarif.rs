@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+const CODESONAR_FINGERPRINT: &str = "codesonarFingerprint";
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Log {
@@ -20,6 +22,7 @@ impl Log {
 #[serde(default, rename_all = "camelCase")]
 pub struct Run {
     pub tool: Tool,
+    pub invocations: Vec<Invocation>,
     pub results: Vec<SarifResult>,
     pub original_uri_base_ids: HashMap<String, ArtifactLocation>,
 }
@@ -40,6 +43,23 @@ impl Run {
 
         rules.iter().find(|rule| rule.id == id)
     }
+
+    /// When the analysis finished, as an RFC 3339 timestamp.
+    pub fn end_time(&self) -> Option<&str> {
+        let invocation = self.invocations.first()?;
+
+        invocation
+            .end_time_utc
+            .as_deref()
+            .or(invocation.start_time_utc.as_deref())
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Invocation {
+    pub start_time_utc: Option<String>,
+    pub end_time_utc: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -122,9 +142,20 @@ pub struct SarifResult {
     pub related_locations: Vec<Location>,
     pub fixes: Vec<Fix>,
     pub hosted_viewer_uri: Option<String>,
+    pub fingerprints: HashMap<String, String>,
+    pub partial_fingerprints: HashMap<String, String>,
 }
 
 impl SarifResult {
+    /// CodeSonar's fingerprint, which identifies a warning across analyses.
+    pub fn fingerprint(&self) -> Option<&str> {
+        self.fingerprints
+            .get(CODESONAR_FINGERPRINT)
+            .or_else(|| self.partial_fingerprints.get(CODESONAR_FINGERPRINT))
+            .or_else(|| self.fingerprints.values().next())
+            .map(String::as_str)
+    }
+
     pub fn rule_id(&self) -> Option<&str> {
         self.rule_id
             .as_deref()
