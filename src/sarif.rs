@@ -236,10 +236,13 @@ mod tests {
                     {"id": "LANG.MEM.BO", "name": "Buffer Overrun"}
                 ]
             }},
+            "invocations": [{"startTimeUtc": "2026-07-24T19:11:18Z",
+                             "endTimeUtc": "2026-07-24T19:11:35.654875Z"}],
             "originalUriBaseIds": {"SRCROOT": {"uri": "file:///build/"}},
             "results": [
                 {"ruleId": "LANG.MEM.BO", "ruleIndex": 1,
                  "message": {"text": "Buffer overrun"},
+                 "fingerprints": {"codesonarCluster": "9f6c", "codesonarFingerprint": "2d2c"},
                  "locations": [{"physicalLocation": {
                     "artifactLocation": {"uri": "src/main.c", "uriBaseId": "SRCROOT"},
                     "region": {"startLine": 3, "startColumn": 5}}}],
@@ -271,6 +274,43 @@ mod tests {
         assert_eq!(region.start_column, Some(5));
         assert_eq!(region.end_line, None);
         assert_eq!(run.results[1].level, Some(Level::Warning));
+    }
+
+    #[test]
+    fn reads_fingerprints() {
+        let log = Log::from_json(LOG).unwrap();
+        let run = &log.runs[0];
+
+        assert_eq!(run.results[0].fingerprint(), Some("2d2c"));
+        assert_eq!(run.results[1].fingerprint(), None);
+
+        let partial = SarifResult {
+            partial_fingerprints: [("codesonarFingerprint".into(), "abcd".into())].into(),
+            ..SarifResult::default()
+        };
+        assert_eq!(partial.fingerprint(), Some("abcd"));
+
+        let other = SarifResult {
+            fingerprints: [("otherTool".into(), "1234".into())].into(),
+            ..SarifResult::default()
+        };
+        assert_eq!(other.fingerprint(), Some("1234"));
+    }
+
+    #[test]
+    fn reads_analysis_time() {
+        let log = Log::from_json(LOG).unwrap();
+        assert_eq!(log.runs[0].end_time(), Some("2026-07-24T19:11:35.654875Z"));
+
+        let run = Run {
+            invocations: vec![Invocation {
+                start_time_utc: Some("2026-07-24T19:11:18Z".into()),
+                end_time_utc: None,
+            }],
+            ..Run::default()
+        };
+        assert_eq!(run.end_time(), Some("2026-07-24T19:11:18Z"));
+        assert_eq!(Run::default().end_time(), None);
     }
 
     #[test]
