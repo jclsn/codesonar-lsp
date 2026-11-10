@@ -24,6 +24,50 @@ pub struct Config {
     pub changed: Changed,
     /// Directory of the memory of analyzed code.
     pub state_dir: Option<PathBuf>,
+    /// How to run an analysis.
+    pub analyze: AnalyzeConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AnalyzeConfig {
+    /// The CodeSonar command.
+    pub command: String,
+    /// CodeSonar project file, relative to the workspace root.
+    pub project_file: PathBuf,
+    /// Build command, as a list or a string split at whitespace.
+    #[serde(deserialize_with = "words")]
+    pub build_command: Vec<String>,
+    /// Hub project path. Defaults to `/` and the hub project.
+    pub project: Option<String>,
+    /// Further arguments of `codesonar analyze`.
+    pub args: Vec<String>,
+}
+
+impl Default for AnalyzeConfig {
+    fn default() -> Self {
+        Self {
+            command: "codesonar".into(),
+            project_file: ".codesonar/project".into(),
+            build_command: vec!["make".into(), "-B".into()],
+            project: None,
+            args: Vec::new(),
+        }
+    }
+}
+
+fn words<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Words {
+        Line(String),
+        List(Vec<String>),
+    }
+
+    Ok(match Words::deserialize(deserializer)? {
+        Words::Line(line) => line.split_whitespace().map(str::to_string).collect(),
+        Words::List(list) => list,
+    })
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

@@ -1,18 +1,23 @@
 //! The language server.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use serde_json::Value;
+use anyhow::{Context, bail};
+use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
-use tower_lsp::jsonrpc::{Error, Result};
+use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::{self, Analysis};
-use crate::code_action::{self, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND};
+use crate::analyze;
+use crate::code_action;
+use crate::commands::{
+    self, AnalyzeArgs, ConnectArgs, LoadArgs, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND,
+};
 use crate::config::{Config, expand_home};
 use crate::hover;
 use crate::hub::{self, Hub};
@@ -79,6 +84,48 @@ impl State {
         }
     }
 
+    fn status(&self) -> Value {
+        let Some(analysis) = &self.analysis else {
+            return json!({"loaded": false});
+        };
+        let url = analysis
+            .hub_id
+            .as_ref()
+            .zip(self.hub.as_ref())
+            .and_then(|(id, hub)| hub.analysis_url(id).ok());
+        json!({
+            "loaded": true,
+            "name": analysis.name,
+            "key": analysis.key,
+            "hubId": analysis.hub_id,
+            "url": url,
+            "total": analysis.len(),
+            "shown": self.store.len(),
+            "counts": analysis.counts(),
+        })
+    }
+
+    /// The shown warnings, by file and position.
+    fn warnings(&self) -> Value {
+        let mut files: Vec<_> = self.store.files().collect();
+        files.sort_by_key(|(uri, _)| uri.as_str());
+        let warnings: Vec<Value> = files
+            .into_iter()
+            .flat_map(|(uri, warnings)| {
+                let mut warnings: Vec<&Warning> = warnings.iter().collect();
+                warnings.sort_by_key(|w| w.range.start);
+                warnings.into_iter().map(move |warning| {
+                    let mut value = json!(warning.to_diagnostic());
+                    value["uri"] = json!(uri);
+                    value["status"] = json!(warning.status);
+                    value["hubUri"] = json!(warning.hub_uri);
+                    value
+                })
+            })
+            .collect();
+        Value::Array(warnings)
+    }
+
     fn diagnostics(&self, uri: &Url) -> (Vec<Diagnostic>, Option<i32>) {
         let diagnostics = self
             .store
@@ -121,34 +168,32 @@ impl Backend {
             .await;
     }
 
-    /// Loads the analysis shown before, else the configured one.
+    /// Loads the analysis shown before, else the configured one, and
+    /// reports errors.
     async fn reload(&self) {
         let selection = self.state.read().await.selection.clone();
-        self.load(selection.unwrap_or(Selection::Configured)).await;
+
+        if let Err(error) = self.load(selection.unwrap_or(Selection::Configured)).await {
+            self.error(format!("{error:#}")).await;
+        }
     }
 
     /// Loads an analysis and publishes its warnings as diagnostics.
-    async fn load(&self, selection: Selection) {
+    async fn load(&self, selection: Selection) -> anyhow::Result<()> {
         let _guard = self.reload_lock.lock().await;
         let (config, root, hub) = {
             let state = self.state.read().await;
             (state.config.clone(), state.root.clone(), state.hub.clone())
         };
 
-        let loaded =
-            match source::load(&config, root.as_deref(), hub.as_deref(), selection.clone()).await {
-                Ok(Some(loaded)) => loaded,
-                Ok(None) => {
-                    self.client
-                        .log_message(MessageType::INFO, "CodeSonar: no warning source configured")
-                        .await;
-                    return;
-                }
-                Err(error) => {
-                    self.error(format!("{error:#}")).await;
-                    return;
-                }
-            };
+        let Some(loaded) =
+            source::load(&config, root.as_deref(), hub.as_deref(), selection.clone()).await?
+        else {
+            self.client
+                .log_message(MessageType::INFO, "CodeSonar: no warning source configured")
+                .await;
+            return Ok(());
+        };
 
         let warnings = warning::from_log(&loaded.log, &config, root.as_deref());
         let time = loaded
@@ -184,6 +229,8 @@ impl Backend {
         if let Some(hub) = hub {
             self.learn_from_hub(&config, &hub).await;
         }
+
+        Ok(())
     }
 
     /// Gives warnings whose analyzed code is still unknown the code of the
@@ -252,6 +299,7 @@ impl Backend {
         self.remember(config, &key, learned).await;
         let uris: Vec<Url> = sources.into_iter().map(|(uri, _)| uri).collect();
         self.publish(&uris).await;
+        self.loaded().await;
     }
 
     async fn warn(&self, message: String) {
@@ -299,7 +347,7 @@ impl Backend {
     }
 
     async fn loaded(&self) {
-        let message = {
+        let (message, status) = {
             let state = self.state.read().await;
             let Some(analysis) = &state.analysis else {
                 return;
@@ -311,9 +359,12 @@ impl Backend {
                 message.push_str(&format!(", {} in changed code", counts.changed));
             }
 
-            message
+            (message, state.status())
         };
         self.client.log_message(MessageType::INFO, message).await;
+        self.client
+            .send_notification::<commands::Loaded>(status)
+            .await;
     }
 
     async fn publish(&self, uris: &[Url]) {
@@ -364,6 +415,97 @@ impl Backend {
         }
 
         self.publish(&[uri]).await;
+    }
+
+    fn hub(state: &State) -> anyhow::Result<Arc<Hub>> {
+        state.hub.clone().context("no hub configured")
+    }
+
+    async fn connect(&self, args: ConnectArgs) -> anyhow::Result<Value> {
+        let hub = {
+            let mut state = self.state.write().await;
+            let mut config = state.config.clone();
+            let mut hub = config.hub.take().unwrap_or_default();
+
+            if let Some(url) = args.url {
+                hub.url = url;
+            }
+
+            if args.username.is_some() {
+                hub.username = args.username;
+            }
+
+            if args.password.is_some() {
+                hub.password = args.password;
+            }
+
+            if args.project.is_some() {
+                hub.project = args.project.clone();
+                hub.analysis_id.clear();
+            }
+
+            config.hub = Some(hub);
+            state.configure(config)?;
+            Self::hub(&state)?
+        };
+
+        let projects = hub.projects().await?;
+
+        if args.project.is_some() {
+            self.load(Selection::Latest).await?;
+        }
+
+        Ok(json!(projects))
+    }
+
+    async fn projects(&self) -> anyhow::Result<Value> {
+        let hub = Self::hub(&*self.state.read().await)?;
+        Ok(json!(hub.projects().await?))
+    }
+
+    async fn analyses(&self) -> anyhow::Result<Value> {
+        let (hub, current) = {
+            let state = self.state.read().await;
+            let current = state.analysis.as_ref().and_then(|a| a.hub_id.clone());
+            (Self::hub(&state)?, current)
+        };
+        let project = hub
+            .config()
+            .project
+            .clone()
+            .context("no hub project configured")?;
+        let analyses: Vec<Value> = hub
+            .analyses(&project)
+            .await?
+            .into_iter()
+            .map(|analysis| {
+                let mut value = json!(analysis);
+                value["finished"] = json!(analysis.is_finished());
+                value["current"] = json!(current.as_deref() == Some(&analysis.id.to_string()));
+                value
+            })
+            .collect();
+        Ok(json!({"project": project, "analyses": analyses}))
+    }
+
+    async fn load_command(&self, args: LoadArgs) -> anyhow::Result<Value> {
+        let selection = match (args.analysis, args.file) {
+            (Some(Value::String(id)), _) => Selection::Hub(id),
+            (Some(Value::Number(id)), _) => Selection::Hub(id.to_string()),
+            (Some(other), _) => bail!("invalid analysis id {other}"),
+            (None, Some(file)) => Selection::File(expand_home(Path::new(&file))),
+            (None, None) if args.latest => Selection::Latest,
+            (None, None) => Selection::Configured,
+        };
+        self.load(selection).await?;
+        Ok(self.state.read().await.status())
+    }
+
+    async fn analyze_command(&self, args: AnalyzeArgs) -> anyhow::Result<Value> {
+        let state = self.state.read().await;
+        let root = state.root.as_deref().context("no workspace folder")?;
+        let command = analyze::command(&state.config, root, args.name.as_deref())?;
+        Ok(json!(command))
     }
 
     async fn watch_files(&self) {
@@ -447,7 +589,7 @@ impl LanguageServer for Backend {
                     },
                 )),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec![REFRESH_COMMAND.to_string(), OPEN_IN_HUB_COMMAND.to_string()],
+                    commands: commands::ALL.iter().map(|c| c.to_string()).collect(),
                     ..ExecuteCommandOptions::default()
                 }),
                 ..ServerCapabilities::default()
@@ -577,16 +719,38 @@ impl LanguageServer for Backend {
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
-        match params.command.as_str() {
-            REFRESH_COMMAND => self.reload().await,
-            OPEN_IN_HUB_COMMAND => self.open_in_hub(&params.arguments).await?,
+        let arguments = &params.arguments;
+        let result = match params.command.as_str() {
+            REFRESH_COMMAND => {
+                self.reload().await;
+                return Ok(None);
+            }
+            OPEN_IN_HUB_COMMAND => {
+                self.open_in_hub(arguments).await?;
+                return Ok(None);
+            }
+            commands::CONNECT => self.connect(parse(arguments)?).await,
+            commands::PROJECTS => self.projects().await,
+            commands::ANALYSES => self.analyses().await,
+            commands::LOAD => self.load_command(parse(arguments)?).await,
+            commands::STATUS => Ok(self.state.read().await.status()),
+            commands::WARNINGS => Ok(self.state.read().await.warnings()),
+            commands::ANALYZE_COMMAND => self.analyze_command(parse(arguments)?).await,
             command => {
                 return Err(Error::invalid_params(format!("unknown command {command}")));
             }
-        }
+        };
 
-        Ok(None)
+        result.map(Some).map_err(|error| Error {
+            code: ErrorCode::InternalError,
+            message: format!("{error:#}").into(),
+            data: None,
+        })
     }
+}
+
+fn parse<T: Default + for<'de> serde::Deserialize<'de>>(arguments: &[Value]) -> Result<T> {
+    commands::args(arguments).map_err(Error::invalid_params)
 }
 
 #[allow(deprecated)]
