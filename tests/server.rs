@@ -781,6 +781,34 @@ fn creates_the_project_configuration() {
 }
 
 #[test]
+fn reports_the_hub_and_presets_in_the_status() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut options = hub_options(dir.path(), &hub);
+    options["analyze"] = json!({"presets": ["cert"]});
+
+    let mut client = Client::initialize(dir.path(), options);
+    let loaded = client.expect("codesonar/loaded", |_| true);
+    assert_eq!(loaded["hub"], hub.uri());
+    assert_eq!(loaded["project"], "test");
+    assert_eq!(loaded["presets"], json!(["cert"]));
+    assert_eq!(loaded["name"], "done");
+
+    client.shutdown();
+
+    let dir = workspace();
+    let mut client = Client::initialize(dir.path(), json!({"sarifFile": "missing.sarif"}));
+    client.expect("window/showMessage", |_| true);
+
+    assert_eq!(
+        client.command("codesonar.status", Value::Null),
+        json!({"loaded": false, "hub": null, "project": null, "presets": []})
+    );
+    client.shutdown();
+}
+
+#[test]
 fn lists_presets() {
     let dir = workspace();
     let install = dir.path().join("install");
