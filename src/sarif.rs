@@ -141,6 +141,7 @@ pub struct SarifResult {
     pub locations: Vec<Location>,
     pub related_locations: Vec<Location>,
     pub fixes: Vec<Fix>,
+    pub code_flows: Vec<CodeFlow>,
     pub hosted_viewer_uri: Option<String>,
     pub fingerprints: HashMap<String, String>,
     pub partial_fingerprints: HashMap<String, String>,
@@ -166,8 +167,32 @@ impl SarifResult {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Location {
+    /// Numbers the events of a warning, as the hub shows them.
+    pub id: Option<u32>,
     pub physical_location: Option<PhysicalLocation>,
     pub message: Option<Message>,
+}
+
+/// The path through the code that leads to a warning.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CodeFlow {
+    pub thread_flows: Vec<ThreadFlow>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ThreadFlow {
+    pub locations: Vec<ThreadFlowLocation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ThreadFlowLocation {
+    pub location: Option<Location>,
+    /// Call depth, 1 for the procedure of the warning.
+    pub nesting_level: Option<u32>,
+    pub kinds: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

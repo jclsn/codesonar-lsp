@@ -282,6 +282,7 @@ mod tests {
             hub_uri: None,
             related: Vec::new(),
             fixes: vec![fix],
+            events: Vec::new(),
             fingerprint: fingerprint.into(),
             status: Status::Unverified,
         }

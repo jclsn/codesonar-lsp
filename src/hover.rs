@@ -17,6 +17,7 @@ pub struct Explanation {
     pub description: Option<String>,
     pub status: Status,
     pub related: Vec<Related>,
+    pub events: Vec<ExplainedEvent>,
     pub help_uri: Option<Url>,
     pub hub_uri: Option<Url>,
     /// The whole explanation as Markdown, as shown on hover.
@@ -29,6 +30,17 @@ pub struct Related {
     /// 1-based line.
     pub line: u32,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainedEvent {
+    pub number: Option<u32>,
+    pub uri: Url,
+    /// 1-based line in the analyzed code.
+    pub line: u32,
+    pub message: String,
+    /// Call depth, 0 for the procedure of the warning.
+    pub depth: u32,
 }
 
 impl Explanation {
@@ -52,6 +64,17 @@ impl Explanation {
                     uri: related.location.uri.clone(),
                     line: related.location.range.start.line + 1,
                     message: related.message.clone(),
+                })
+                .collect(),
+            events: warning
+                .events
+                .iter()
+                .map(|event| ExplainedEvent {
+                    number: event.number,
+                    uri: event.location.uri.clone(),
+                    line: event.location.range.start.line + 1,
+                    message: event.message.clone(),
+                    depth: event.depth,
                 })
                 .collect(),
             help_uri: warning.help_uri.clone(),

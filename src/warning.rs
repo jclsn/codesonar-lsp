@@ -31,10 +31,23 @@ pub struct Warning {
     pub hub_uri: Option<Url>,
     pub related: Vec<DiagnosticRelatedInformation>,
     pub fixes: Vec<QuickFix>,
+    /// The events on the path to the warning, in order.
+    pub events: Vec<Event>,
     /// Identifies the warning across analyses.
     pub fingerprint: String,
     /// Whether the code of the warning changed since the analysis.
     pub status: Status,
+}
+
+/// A step on the path to a warning, e.g. where a pointer is freed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Event {
+    /// The number the hub shows; calls and returns have none.
+    pub number: Option<u32>,
+    pub location: Location,
+    pub message: String,
+    /// Call depth, 0 for the procedure of the warning.
+    pub depth: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,7 +147,6 @@ impl Resolver<'_> {
             uri,
             range,
             severity: to_severity(level),
-            message,
             rule_id: result.rule_id().map(str::to_string),
             rule_name: rule.and_then(|rule| rule.name.clone()),
             description,
@@ -155,7 +167,48 @@ impl Resolver<'_> {
                 .iter()
                 .filter_map(|fix| self.fix(fix))
                 .collect(),
+            events: self.events(result, &message),
+            message,
         })
+    }
+
+    /// The events of the first code flow, without the warning itself,
+    /// which CodeSonar adds as the last event.
+    fn events(&self, result: &SarifResult, message: &str) -> Vec<Event> {
+        let locations = result
+            .code_flows
+            .iter()
+            .flat_map(|flow| &flow.thread_flows)
+            .map(|thread| &thread.locations)
+            .next();
+        let mut events: Vec<Event> = locations
+            .into_iter()
+            .flatten()
+            .filter_map(|step| {
+                let location = step.location.as_ref()?;
+                let physical = location.physical_location.as_ref()?;
+                Some(Event {
+                    number: location.id,
+                    location: Location {
+                        uri: self.uri(physical.artifact_location.as_ref()?)?,
+                        range: physical.region.map(to_range).unwrap_or_default(),
+                    },
+                    message: location
+                        .message
+                        .as_ref()
+                        .and_then(message_text)
+                        .map(|text| inline_references(&text))
+                        .unwrap_or_default(),
+                    depth: step.nesting_level.unwrap_or(1).saturating_sub(1),
+                })
+            })
+            .collect();
+
+        if events.last().is_some_and(|event| event.message == message) {
+            events.pop();
+        }
+
+        events
     }
 
     fn related(&self, location: &sarif::Location) -> Option<DiagnosticRelatedInformation> {
@@ -296,6 +349,25 @@ fn message_text(message: &sarif::Message) -> Option<String> {
 }
 
 /// A hash that stays the same across builds, unlike the one of `std`.
+/// CodeSonar appends the location of a value in double brackets, e.g.
+/// `malloc(n)[[utils.c:13]]`: shows it as `malloc(n) (utils.c:13)`.
+fn inline_references(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find("[[") {
+        let Some(end) = rest[start..].find("]]") else {
+            break;
+        };
+        result.push_str(&rest[..start]);
+        result.push_str(&format!(" ({})", &rest[start + 2..start + end]));
+        rest = &rest[start + end + 2..];
+    }
+
+    result.push_str(rest);
+    result
+}
+
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)

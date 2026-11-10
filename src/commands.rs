@@ -79,7 +79,8 @@ pub struct AnalyzeArgs {
 /// Explains the warnings of a file: `{uri, fingerprint}` picks one by its
 /// fingerprint, `{uri, range}` those in a range. Returns
 /// `[{title, ruleId, message, description, status, related: [{uri, line,
-/// message}], helpUri, hubUri, markdown}]`.
+/// message}], events: [{number, uri, line, message, depth}], helpUri,
+/// hubUri, markdown}]`.
 #[derive(Debug, Deserialize)]
 pub struct ExplainArgs {
     pub uri: Url,

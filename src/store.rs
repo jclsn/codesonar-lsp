@@ -86,6 +86,7 @@ mod tests {
             hub_uri: None,
             related: Vec::new(),
             fixes: Vec::new(),
+            events: Vec::new(),
             fingerprint: String::new(),
             status: Default::default(),
         }
