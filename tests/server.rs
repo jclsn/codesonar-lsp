@@ -293,6 +293,50 @@ fn offers_quick_fix_and_opens_hub() {
 }
 
 #[test]
+fn explains_warning() {
+    let dir = workspace();
+    let mut client = Client::initialize(dir.path(), options(dir.path()));
+    let main = uri(dir.path().join("src/main.c"));
+    client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+
+    let range = json!({"start": {"line": 4, "character": 4}, "end": {"line": 4, "character": 4}});
+    let actions = client.request(
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": main}, "range": range, "context": {"diagnostics": []}}),
+    );
+
+    let command = actions[1]["command"].clone();
+    assert_eq!(command["command"], "codesonar.explain");
+
+    let result = client.request(
+        "workspace/executeCommand",
+        json!({"command": command["command"], "arguments": command["arguments"]}),
+    );
+
+    assert_eq!(result[0]["title"], "Null Pointer Dereference");
+    assert_eq!(result[0]["ruleId"], "LANG.MEM.NPD");
+    assert_eq!(result[0]["related"][0]["line"], 3);
+
+    let at = client.request(
+        "workspace/executeCommand",
+        json!({"command": "codesonar.explain", "arguments": [
+            {"uri": main, "range": {"start": {"line": 4, "character": 0}, "end": {"line": 5, "character": 0}}}
+        ]}),
+    );
+
+    assert_eq!(at, result);
+
+    let response = client.respond(
+        "workspace/executeCommand",
+        json!({"command": "codesonar.explain", "arguments": []}),
+    );
+
+    assert_eq!(response["error"]["code"], -32602);
+
+    client.shutdown();
+}
+
+#[test]
 fn refresh_clears_fixed_warnings() {
     let dir = workspace();
     let mut client = Client::initialize(dir.path(), options(dir.path()));

@@ -154,4 +154,20 @@ mod tests {
         assert_eq!(actions[0].title, "Show details for MISC.FMT");
         assert!(self::actions("/ws/src/main.c", 0).is_empty());
     }
+
+    #[test]
+    fn offers_explanation() {
+        let actions = actions("/ws/src/main.c", 4);
+        let explain = &actions[1];
+
+        assert_eq!(explain.title, "Show details for LANG.MEM.NPD");
+        assert_eq!(explain.kind, Some(CodeActionKind::EMPTY));
+
+        let command = explain.command.as_ref().unwrap();
+        assert_eq!(command.command, EXPLAIN_COMMAND);
+
+        let argument = &command.arguments.as_ref().unwrap()[0];
+        assert_eq!(argument["uri"], "file:///ws/src/main.c");
+        assert!(argument["fingerprint"].is_string());
+    }
 }

@@ -235,4 +235,75 @@ mod tests {
         assert_eq!(hover.range, None);
         assert_eq!(markdown(hover).matches("\n\n---\n\n").count(), 1);
     }
+
+    #[test]
+    fn explains_warning_by_fingerprint() {
+        let store = store();
+        let uri = Url::from_file_path("/ws/src/main.c").unwrap();
+        let warning = &store.get(&uri)[0];
+
+        let explanations = explain(&store, &uri, Some(&warning.fingerprint), None);
+
+        assert_eq!(explanations.len(), 1);
+
+        let explanation = &explanations[0];
+        assert_eq!(explanation.title, "Null Pointer Dereference");
+        assert_eq!(explanation.rule_id.as_deref(), Some("LANG.MEM.NPD"));
+        assert_eq!(explanation.message, "Null pointer dereference of 'p'");
+        assert_eq!(
+            explanation.description.as_deref(),
+            Some("Check pointers **before** use.")
+        );
+        assert_eq!(explanation.status, Status::Unverified);
+
+        assert_eq!(explanation.related.len(), 1);
+        assert_eq!(explanation.related[0].line, 3);
+        assert_eq!(explanation.related[0].message, "'p' is set to NULL");
+        assert_eq!(
+            explanation.hub_uri.as_ref().map(Url::as_str),
+            Some("https://hub.example.com:7340/warninginstance/12.html")
+        );
+        assert_eq!(explanation.markdown, super::explanation(warning));
+    }
+
+    #[test]
+    fn titles_warning_by_rule_id_without_name() {
+        let mut warning = store().get(&Url::from_file_path("/ws/src/main.c").unwrap())[0].clone();
+        warning.rule_name = None;
+
+        assert_eq!(Explanation::new(&warning).title, "LANG.MEM.NPD");
+
+        warning.rule_id = None;
+
+        assert_eq!(Explanation::new(&warning).title, "Warning");
+    }
+
+    #[test]
+    fn explains_warnings_in_range() {
+        let store = store();
+        let uri = Url::from_file_path("/ws/src/main.c").unwrap();
+
+        assert_eq!(
+            explain(
+                &store,
+                &uri,
+                None,
+                Some(Range::new(Position::new(4, 0), Position::new(5, 0)))
+            )
+            .len(),
+            1
+        );
+
+        assert!(
+            explain(
+                &store,
+                &uri,
+                None,
+                Some(Range::new(Position::new(0, 0), Position::new(1, 0)))
+            )
+            .is_empty()
+        );
+
+        assert!(explain(&store, &uri, Some("unknown"), None).is_empty());
+    }
 }
