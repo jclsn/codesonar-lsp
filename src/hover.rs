@@ -442,4 +442,17 @@ mod tests {
         assert!(explanation.rules.is_empty());
         assert_eq!(explanation.help_uri, warning.help_uri);
     }
+
+    #[test]
+    fn splits_messages_into_paragraphs() {
+        assert_eq!(
+            paragraphs("freed again by free().The issue can occur."),
+            "freed again by free().\n\nThe issue can occur."
+        );
+        assert_eq!(
+            paragraphs("a local variable.  - local was defined at main.c:16."),
+            "a local variable.\n\n- local was defined at main.c:16."
+        );
+        assert_eq!(paragraphs("see main.c or std.IO"), "see main.c or std.IO");
+    }
 }
