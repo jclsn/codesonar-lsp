@@ -107,3 +107,78 @@ pub fn default_dir() -> Option<PathBuf> {
         })?;
     Some(state.join("codesonar-lsp"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn anchor(line: &str) -> Anchor {
+        Anchor {
+            line: line.into(),
+            before: String::new(),
+            after: String::new(),
+        }
+    }
+
+    #[test]
+    fn keeps_anchors_across_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut memory = Memory::open(dir.path());
+
+        assert!(memory.anchors("a").is_empty());
+
+        memory
+            .remember("a", [("fp1".into(), anchor("x"))].into())
+            .unwrap();
+        memory
+            .remember("a", [("fp2".into(), anchor("y"))].into())
+            .unwrap();
+
+        let memory = Memory::open(dir.path());
+        let anchors = memory.anchors("a");
+
+        assert_eq!(anchors.len(), 2);
+        assert_eq!(anchors["fp1"], anchor("x"));
+        assert!(memory.anchors("b").is_empty());
+    }
+
+    #[test]
+    fn forgets_least_recently_used_analyses() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut memory = Memory::open(dir.path());
+
+        for i in 0..=LIMIT {
+            memory
+                .remember(
+                    &format!("analysis {i}"),
+                    [("fp".into(), anchor("x"))].into(),
+                )
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+
+        let memory = Memory::open(dir.path());
+        assert!(memory.anchors("analysis 0").is_empty());
+        assert_eq!(memory.anchors("analysis 1").len(), 1);
+        assert_eq!(memory.anchors(&format!("analysis {LIMIT}")).len(), 1);
+    }
+
+    #[test]
+    fn starts_over_with_damaged_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("memory.json"), "{").unwrap();
+
+        assert!(Memory::open(dir.path()).anchors("a").is_empty());
+
+        std::fs::write(
+            dir.path().join("memory.json"),
+            r#"{"version":2,"analyses":{}}"#,
+        )
+        .unwrap();
+
+        let mut memory = Memory::open(dir.path());
+        memory.remember("a", HashMap::new()).unwrap();
+
+        assert!(Memory::open(dir.path()).data.analyses.contains_key("a"));
+    }
+}
