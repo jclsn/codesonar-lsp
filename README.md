@@ -1,27 +1,49 @@
 # codesonar-lsp
 
-A language server that shows CodeSonar warnings directly in the editor.
+CodeSonar warnings in the editor: a language server that does all the work,
+and editor clients that build on it.
 
-**!!! Very basic WIP version. Not functional yet !!!**
+| Folder              | Content                                              |
+| ------------------- | ---------------------------------------------------- |
+| `server`            | The language server, in Rust                         |
+| `vim`               | Vim plugin, on top of [yegappan/lsp]                 |
+| `examples/demo`     | C file with a matching SARIF file                    |
+| `examples/test_project` | C program whose analyses are in the hub project `test_project` |
+
+[yegappan/lsp]: https://github.com/yegappan/lsp
 
 ## Features
 
 - **Diagnostics** for every CodeSonar warning, including severity, warning class
   and related locations.
+- **Changed code**: analyses take minutes, so the code has often changed since
+  the shown one ran. Warnings move along with their code while it is edited,
+  and warnings whose line was edited disappear, because they are usually
+  fixed. The server remembers the analyzed code, so this also works after a
+  restart.
 - **Explanations** on hover: warning class, message, description and links to
   the documentation and to the warning on the hub.
 - **Quick fixes**, if the SARIF export contains fixes.
 - **Open in CodeSonar Hub** as a code action.
-- **Reload** when the SARIF file changes or via the `codesonar.refresh` command.
+- **Commands** for clients: sign in to a hub, list projects and analyses,
+  show an analysis and get the command line of a new analysis.
 
-The warnings are read from a SARIF export, either from a local file or
-directly from the CodeSonar hub.
+The warnings come from the CodeSonar hub or from an exported SARIF file.
 
 ## Installation
 
 ```sh
 cargo install --path .
 ```
+
+For the Vim plugin, add the `vim` folder to the runtime path, e.g. with
+vim-plug:
+
+```vim
+Plug '~/Workspace/codesonar-lsp', {'rtp': 'vim'}
+```
+
+See `:help codesonar` for its commands.
 
 ## Settings
 
@@ -30,35 +52,74 @@ via `workspace/didChangeConfiguration` under the `codesonar` key.
 
 ```json
 {
-  "sarifFile": "codesonar.sarif",
   "hub": {
     "url": "https://hub.example.com:7340",
-    "analysisId": "42",
+    "project": "my_project",
     "username": "alice",
-    "password": "secret",
-    "sarifPath": "/analysis/{analysisId}-allwarnings.sarif",
-    "caCertificate": "/etc/ssl/hub-ca.pem",
-    "acceptInvalidCerts": false
+    "passwordFile": "~/.config/codesonar/password",
+    "caCertificate": "/etc/ssl/hub-ca.pem"
   },
   "pathMappings": [
     { "from": "C:\\build\\project", "to": "/home/alice/project" }
-  ]
+  ],
+  "changed": "hide",
+  "analyze": { "buildCommand": "make -B" }
 }
 ```
 
-| Setting        | Description                                                        |
-| -------------- | ------------------------------------------------------------------ |
-| `sarifFile`    | SARIF file, absolute or relative to the workspace root.            |
-| `hub`          | Download the warnings from the hub. Takes precedence over `sarifFile`. |
-| `pathMappings` | Maps paths from the analysis machine to local paths.               |
-
-If `hub.password` is not set, the `CODESONAR_PASSWORD` environment variable is
-used. Without `hub.username` the hub is accessed anonymously.
+| Setting                  | Description                                                     |
+| ------------------------ | --------------------------------------------------------------- |
+| `hub.url`                | Hub URL.                                                        |
+| `hub.project`            | Hub project, by name or id. Its newest finished analysis is shown. |
+| `hub.analysisId`         | Show this analysis instead.                                     |
+| `hub.username`           | Hub user. Without one, the hub is accessed anonymously.         |
+| `hub.password`           | Hub password.                                                   |
+| `hub.passwordFile`       | File with the hub password. Without either, `CODESONAR_PASSWORD` is used. |
+| `hub.sarifPath`          | Hub path of the SARIF export. Default: `/analysis/{analysisId}-allwarnings.sarif`. |
+| `hub.caCertificate`      | PEM file with an additional trusted CA certificate.             |
+| `hub.acceptInvalidCerts` | Do not verify the hub's certificate.                            |
+| `sarifFile`              | SARIF file, absolute or relative to the workspace root. Used without `hub`. |
+| `pathMappings`           | Maps paths from the analysis machine to local paths.            |
+| `changed`                | Warnings in code changed since the analysis: `hide` or `mark` them as hints. |
+| `stateDir`               | Where the analyzed code is remembered. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
+| `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
+| `analyze.projectFile`    | CodeSonar project file, relative to the workspace root. Default: `.codesonar/project`. |
+| `analyze.buildCommand`   | Build command, a string or a list. Default: `make -B`.          |
+| `analyze.project`        | Hub project path. Default: `/` and `hub.project`.               |
+| `analyze.args`           | Further arguments of `codesonar analyze`.                       |
 
 The file watcher covers `**/*.sarif`. Use `codesonar.refresh` for other files
 or for the hub.
 
-## Editor setup
+## How changed code is detected
+
+For each warning the server records the analyzed line and the closest
+non-blank lines around it. It reads them from the file while the file is
+unchanged since the analysis, and otherwise from the analyzed sources that
+the hub keeps. A warning then follows its line through edits. Once the line
+itself was edited or deleted, the warning counts as changed.
+
+## Commands
+
+Clients run these with `workspace/executeCommand`. Each takes at most one
+argument, an object.
+
+| Command                     | Argument                                         | Result |
+| --------------------------- | ------------------------------------------------ | ------ |
+| `codesonar.connect`         | `{url, username, password, project}`, all optional | The hub projects; with `project`, its newest analysis is shown |
+| `codesonar.projects`        |                                                  | `[{id, name}]` |
+| `codesonar.analyses`        |                                                  | `{project, analyses: [{id, name, started, state, finished, current}]}` |
+| `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
+| `codesonar.status`          |                                                  | `{loaded, name, key, hubId, url, total, shown, counts}` |
+| `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
+| `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
+| `codesonar.refresh`         |                                                  | Loads the shown analysis again |
+| `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |
+
+After an analysis was shown, the server sends the notification
+`codesonar/loaded` with the status.
+
+## Other editors
 
 ### Neovim
 
@@ -101,7 +162,11 @@ are placeholders and only work with a matching analysis.
 ## Development
 
 ```sh
+cd server
 cargo fmt
 cargo clippy --all-targets
 cargo test
+
+cd ../vim
+test/run.sh    # needs yegappan/lsp in ~/.vim/plugged/lsp or $LSP_PLUGIN
 ```
