@@ -51,6 +51,49 @@
               "message": { "text": "'p' is set to NULL" }
             }
           ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "location": {
+                        "id": 1,
+                        "physicalLocation": {
+                          "artifactLocation": { "uri": "src/main.c", "uriBaseId": "SRCROOT" },
+                          "region": { "startLine": 3 }
+                        },
+                        "message": { "text": "p is set to lookup()[[util.c:4]]." }
+                      },
+                      "nestingLevel": 1
+                    },
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": { "uri": "src/util%20file.c", "uriBaseId": "SRCROOT" },
+                          "region": { "startLine": 4 }
+                        },
+                        "message": { "text": "Calling procedure lookup." }
+                      },
+                      "nestingLevel": 2,
+                      "kinds": ["call"]
+                    },
+                    {
+                      "location": {
+                        "id": 2,
+                        "physicalLocation": {
+                          "artifactLocation": { "uri": "src/main.c", "uriBaseId": "SRCROOT" },
+                          "region": { "startLine": 5 }
+                        },
+                        "message": { "text": "Null pointer dereference of 'p'" }
+                      },
+                      "nestingLevel": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
           "hostedViewerUri": "https://hub.example.com:7340/warninginstance/12.html",
           "fixes": [
             {

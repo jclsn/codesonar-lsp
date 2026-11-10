@@ -282,6 +282,12 @@ mod tests {
         assert_eq!(explanation.related.len(), 1);
         assert_eq!(explanation.related[0].line, 3);
         assert_eq!(explanation.related[0].message, "'p' is set to NULL");
+
+        assert_eq!(explanation.events.len(), 2);
+        assert_eq!(explanation.events[0].number, Some(1));
+        assert_eq!(explanation.events[0].line, 3);
+        assert_eq!(explanation.events[1].depth, 1);
+
         assert_eq!(
             explanation.hub_uri.as_ref().map(Url::as_str),
             Some("https://hub.example.com:7340/warninginstance/12.html")

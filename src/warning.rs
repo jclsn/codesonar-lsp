@@ -636,4 +636,32 @@ mod tests {
             range(0, 0, 0, 0)
         );
     }
+
+    #[test]
+    fn converts_events_without_the_warning_itself() {
+        let warning = &warnings()[0];
+        assert_eq!(warning.events.len(), 2);
+
+        let first = &warning.events[0];
+        assert_eq!(first.number, Some(1));
+        assert_eq!(first.location.uri, url("/ws/src/main.c"));
+        assert_eq!(first.location.range.start.line, 2);
+        assert_eq!(first.message, "p is set to lookup() (util.c:4).");
+        assert_eq!(first.depth, 0);
+
+        let call = &warning.events[1];
+        assert_eq!(call.number, None);
+        assert_eq!(call.location.uri, url("/ws/src/util file.c"));
+        assert_eq!(call.depth, 1);
+        assert!(warnings()[1].events.is_empty());
+    }
+
+    #[test]
+    fn inlines_references() {
+        assert_eq!(
+            inline_references("a[[x.c:1]] b[[y.c:2]]"),
+            "a (x.c:1) b (y.c:2)"
+        );
+        assert_eq!(inline_references("no [[end"), "no [[end");
+    }
 }
