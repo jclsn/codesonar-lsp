@@ -686,6 +686,36 @@ mod tests {
     }
 
     #[test]
+    fn finds_analyzed_files() {
+        let file = |name: &str| AnalyzedFile {
+            file: name.into(),
+            url: format!("/{name}.json"),
+        };
+
+        let files = [
+            file("/build/app/main.c"),
+            file("/build/lib/main.c"),
+            file("/build/app/util.c"),
+        ];
+
+        let identity = |name: &str| name.to_string();
+
+        let found = find_file(&files, Path::new("/home/me/app/main.c"), identity);
+        assert_eq!(
+            found.unwrap().file,
+            "/build/app/main.c",
+            "most shared components"
+        );
+
+        let mapped = |name: &str| name.replace("/build/lib", "/src");
+        let found = find_file(&files, Path::new("/src/main.c"), mapped);
+
+        assert_eq!(found.unwrap().file, "/build/lib/main.c", "mapped path");
+
+        assert!(find_file(&files, Path::new("/home/me/other.c"), identity).is_none());
+    }
+
+    #[test]
     fn rejects_invalid_settings() {
         let config = HubConfig {
             url: "not a url".into(),

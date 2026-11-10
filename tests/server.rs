@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tower_lsp::lsp_types::Url;
+use wiremock::MockServer;
 
 const FIXTURE: &str = include_str!("fixtures/codesonar.sarif");
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -465,6 +466,87 @@ fn does_not_learn_from_files_edited_after_the_analysis() {
         "unverified, not changed"
     );
     assert!(!dir.path().join("state/memory.json").exists());
+
+    client.shutdown();
+}
+
+/// A mock hub with project `test` whose analysis 3 found the warnings of
+/// the fixture in `MAIN`.
+fn mock_hub(runtime: &tokio::runtime::Runtime, time: &str) -> MockServer {
+    use wiremock::matchers::path;
+    use wiremock::{Mock, ResponseTemplate};
+
+    let mut log: Value = serde_json::from_str(FIXTURE).unwrap();
+    log["runs"][0]["invocations"] = json!([{"endTimeUtc": time}]);
+
+    let source: Vec<Value> = MAIN
+        .lines()
+        .enumerate()
+        .map(|(i, line)| json!({"type": "wdom_line", "number": i + 1, "children": [format!("{line}\n")]}))
+        .collect();
+
+    let routes = [
+        (
+            "/project_search.json",
+            json!({"rows": [{"project": "test", "url": "/project/1.json"}]}),
+        ),
+        (
+            "/project/1.json",
+            json!({"rows": [
+                {"analysis": "running", "state": "ANALYZING", "url": "/analysis/4.json"},
+                {"analysis": "done", "state": "FINISHED", "url": "/analysis/3.json"},
+            ]}),
+        ),
+        ("/analysis/3-allwarnings.sarif", log),
+        (
+            "/analysis/3-files.json",
+            json!({"rows": [{"file": "/build/src/main.c", "url": "/analysis/3-file1.json"}]}),
+        ),
+        ("/analysis/3-file1.json", json!({"children": source})),
+    ];
+
+    runtime.block_on(async {
+        let server = MockServer::start().await;
+
+        for (route, body) in routes {
+            Mock::given(path(route))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+        }
+
+        server
+    })
+}
+
+fn hub_options(root: &Path, hub: &MockServer) -> Value {
+    json!({
+        "hub": {"url": hub.uri(), "project": "test"},
+        "pathMappings": [{"from": "/build", "to": root}],
+        "stateDir": root.join("state"),
+    })
+}
+
+#[test]
+fn learns_analyzed_code_from_the_hub() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2000-01-01T00:00:00Z");
+    let dir = workspace_with_source("2000-01-01T00:00:00Z");
+    let fixed = MAIN.replace("*p = 1;", "if (p) *p = 1;");
+    std::fs::write(dir.path().join("src/main.c"), fixed).unwrap();
+
+    let mut client = Client::initialize(dir.path(), hub_options(dir.path(), &hub));
+    let main = uri(dir.path().join("src/main.c"));
+
+    let params = client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+    assert_eq!(lines(&params["diagnostics"]), [4], "unverified at first");
+
+    let params = client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+    assert_eq!(
+        params["diagnostics"],
+        json!([]),
+        "changed since the analysis"
+    );
 
     client.shutdown();
 }
