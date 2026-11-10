@@ -210,6 +210,9 @@ fn publishes_diagnostics() {
     let mut client = Client::initialize(dir.path(), options(dir.path()));
     let main = uri(dir.path().join("src/main.c"));
 
+    let loading = client.expect("codesonar/loading", |_| true);
+    assert_eq!(loading, json!({"file": dir.path().join("codesonar.sarif")}));
+
     let params = client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
     let diagnostics = params["diagnostics"].as_array().unwrap();
     assert_eq!(diagnostics.len(), 1);
@@ -742,9 +745,16 @@ fn detects_the_project_from_its_project_files() {
 
     let mut client = Client::initialize(dir.path(), options);
 
+    let loading = client.expect("codesonar/loading", |_| true);
+    assert_eq!(loading, json!({"project": "test"}));
+
     let loaded = client.expect("codesonar/loaded", |_| true);
     assert_eq!(loaded["project"], "test");
     assert_eq!(loaded["hubId"], "3");
+
+    client.command("codesonar.load", json!({"analysis": 3}));
+    let loading = client.expect("codesonar/loading", |_| true);
+    assert_eq!(loading, json!({"analysis": "3"}));
 
     let command = client.command("codesonar.analyzeCommand", Value::Null);
     let line: Vec<&str> = command["command"]
