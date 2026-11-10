@@ -19,11 +19,15 @@ struct Client {
     /// Notifications and requests received while waiting for something else.
     pending: Vec<Value>,
     next_id: i64,
+    _state: tempfile::TempDir,
 }
 
 impl Client {
     fn start() -> Self {
+        // Keeps the memory of the tests away from the user's.
+        let state = tempfile::tempdir().unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_codesonar-lsp"))
+            .env("XDG_STATE_HOME", state.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -48,6 +52,7 @@ impl Client {
             messages,
             pending: Vec::new(),
             next_id: 1,
+            _state: state,
         }
     }
 
@@ -349,6 +354,117 @@ fn reloads_when_sarif_file_changes() {
     client.expect("textDocument/publishDiagnostics", |p| {
         p["uri"] == main && p["diagnostics"] == json!([])
     });
+
+    client.shutdown();
+}
+
+const MAIN: &str = "#include <stdlib.h>\n\nint main(void)\n{\n    *p = 1;\n    return 0;\n}\n";
+
+/// A workspace with the analyzed source and a SARIF log of the given time.
+fn workspace_with_source(time: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let mut log: Value = serde_json::from_str(FIXTURE).unwrap();
+    log["runs"][0]["invocations"] = json!([{"endTimeUtc": time}]);
+    std::fs::write(dir.path().join("codesonar.sarif"), log.to_string()).unwrap();
+    std::fs::create_dir(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/main.c"), MAIN).unwrap();
+    dir
+}
+
+fn tracking_options(root: &Path) -> Value {
+    let mut options = options(root);
+    options["stateDir"] = json!(root.join("state"));
+    options
+}
+
+fn lines(diagnostics: &Value) -> Vec<u64> {
+    diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["range"]["start"]["line"].as_u64().unwrap())
+        .collect()
+}
+
+#[test]
+fn follows_edits_and_hides_changed_warnings() {
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut client = Client::initialize(dir.path(), tracking_options(dir.path()));
+    let main = uri(dir.path().join("src/main.c"));
+    client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+
+    let document = json!({"uri": main, "languageId": "c", "version": 1, "text": MAIN});
+    client.notify("textDocument/didOpen", json!({"textDocument": document}));
+    let params = client.expect("textDocument/publishDiagnostics", |p| p["version"] == 1);
+    assert_eq!(lines(&params["diagnostics"]), [4]);
+
+    let change = |version: i32, text: String| {
+        json!({
+            "textDocument": {"uri": main, "version": version},
+            "contentChanges": [{"text": text}],
+        })
+    };
+
+    client.notify(
+        "textDocument/didChange",
+        change(2, format!("// moved\n{MAIN}")),
+    );
+
+    let params = client.expect("textDocument/publishDiagnostics", |p| p["version"] == 2);
+    assert_eq!(lines(&params["diagnostics"]), [5]);
+
+    let range = json!({"start": {"line": 5, "character": 4}, "end": {"line": 5, "character": 4}});
+    let actions = client.request(
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": main}, "range": range, "context": {"diagnostics": []}}),
+    );
+
+    let edits = &actions[0]["edit"]["changes"][main.as_str().unwrap()];
+    assert_eq!(edits[0]["range"]["start"]["line"], 5, "the fix moved along");
+
+    let fixed = MAIN.replace("*p = 1;", "if (p) *p = 1;");
+    client.notify("textDocument/didChange", change(3, fixed));
+    let params = client.expect("textDocument/publishDiagnostics", |p| p["version"] == 3);
+    assert_eq!(params["diagnostics"], json!([]));
+
+    client.shutdown();
+}
+
+#[test]
+fn remembers_analyzed_code_after_restart() {
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let main = uri(dir.path().join("src/main.c"));
+    let mut client = Client::initialize(dir.path(), tracking_options(dir.path()));
+    client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+
+    client.shutdown();
+
+    // Without the memory, the edited file would count as analyzed code.
+    let fixed = MAIN.replace("*p = 1;", "if (p) *p = 1;");
+    std::fs::write(dir.path().join("src/main.c"), fixed).unwrap();
+
+    let mut client = Client::initialize(dir.path(), tracking_options(dir.path()));
+    let params = client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+    assert_eq!(params["diagnostics"], json!([]));
+
+    client.shutdown();
+}
+
+#[test]
+fn does_not_learn_from_files_edited_after_the_analysis() {
+    let dir = workspace_with_source("2000-01-01T00:00:00Z");
+    let main = uri(dir.path().join("src/main.c"));
+    let mut options = tracking_options(dir.path());
+    options["changed"] = json!("mark");
+    let mut client = Client::initialize(dir.path(), options);
+
+    let params = client.expect("textDocument/publishDiagnostics", |p| p["uri"] == main);
+    assert_eq!(lines(&params["diagnostics"]), [4]);
+    assert_eq!(
+        params["diagnostics"][0]["severity"], 1,
+        "unverified, not changed"
+    );
+    assert!(!dir.path().join("state/memory.json").exists());
 
     client.shutdown();
 }

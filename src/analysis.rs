@@ -241,3 +241,149 @@ pub fn parse_time(text: &str) -> Option<SystemTime> {
     let seconds = (days * 86_400 + hour * 3600 + minute * 60 - offset) as f64 + second;
     (seconds >= 0.0).then(|| UNIX_EPOCH + Duration::from_secs_f64(seconds))
 }
+
+#[cfg(test)]
+mod tests {
+    use tower_lsp::lsp_types::{DiagnosticSeverity, Position, Range, TextEdit};
+
+    use super::*;
+
+    const ANALYZED: &str = "int main(void)\n{\n    char *p = 0;\n    *p = 1;\n    return 0;\n}\n";
+
+    fn uri() -> Url {
+        Url::from_file_path("/ws/main.c").unwrap()
+    }
+
+    fn range(line: u32, start: u32, end: u32) -> Range {
+        Range::new(Position::new(line, start), Position::new(line, end))
+    }
+
+    fn warning(fingerprint: &str, line: u32) -> Warning {
+        let fix = QuickFix {
+            title: "Check 'p'".into(),
+            changes: [(
+                uri(),
+                vec![TextEdit {
+                    range: range(line, 4, 4),
+                    new_text: "if (p) ".into(),
+                }],
+            )]
+            .into(),
+        };
+        Warning {
+            uri: uri(),
+            range: range(line, 4, 6),
+            severity: DiagnosticSeverity::ERROR,
+            message: "Null pointer dereference".into(),
+            rule_id: None,
+            rule_name: None,
+            description: None,
+            help_uri: None,
+            hub_uri: None,
+            related: Vec::new(),
+            fixes: vec![fix],
+            fingerprint: fingerprint.into(),
+            status: Status::Unverified,
+        }
+    }
+
+    fn analysis() -> Analysis {
+        Analysis::new(
+            "key".into(),
+            "test".into(),
+            None,
+            None,
+            vec![warning("a", 3), warning("b", 2)],
+        )
+    }
+
+    #[test]
+    fn learns_analyzed_code() {
+        let mut analysis = analysis();
+        assert_eq!(analysis.missing_anchors(), [uri()]);
+
+        let learned = analysis.learn(&uri(), ANALYZED);
+        assert_eq!(learned.len(), 2);
+        assert_eq!(learned["a"].line, "    *p = 1;");
+        assert!(analysis.missing_anchors().is_empty());
+        assert!(
+            analysis.learn(&uri(), ANALYZED).is_empty(),
+            "learned only once"
+        );
+
+        let mut other = Analysis::new(
+            "key".into(),
+            "test".into(),
+            None,
+            None,
+            vec![warning("a", 3)],
+        );
+
+        other.set_anchors(&learned);
+
+        assert!(other.missing_anchors().is_empty());
+    }
+
+    #[test]
+    fn hides_or_marks_changed_warnings() {
+        let mut analysis = analysis();
+
+        analysis.learn(&uri(), ANALYZED);
+        analysis.relocate(&uri(), &ANALYZED.replace("*p = 1;", "if (p) *p = 1;"));
+
+        let shown = analysis.warnings(&uri(), Changed::Hide);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].fingerprint, "b");
+
+        let marked = analysis.warnings(&uri(), Changed::Mark);
+        assert_eq!(marked.len(), 2);
+        assert_eq!(marked[0].status, Status::Changed);
+        assert!(marked[0].fixes.is_empty(), "fix of changed code is dropped");
+
+        assert_eq!(
+            analysis.counts(),
+            Counts {
+                unchanged: 1,
+                changed: 1,
+                ..Counts::default()
+            }
+        );
+    }
+
+    #[test]
+    fn moves_warnings_and_fixes() {
+        let mut analysis = analysis();
+        analysis.learn(&uri(), ANALYZED);
+        analysis.relocate(&uri(), &format!("// comment\n{ANALYZED}"));
+
+        let shown = analysis.warnings(&uri(), Changed::Hide);
+        assert_eq!(shown[0].status, Status::Moved);
+        assert_eq!(shown[0].range, range(4, 4, 6));
+        assert_eq!(shown[0].fixes[0].changes[&uri()][0].range, range(4, 4, 4));
+        assert_eq!(analysis.counts().moved, 2);
+        assert_eq!(analysis.len(), 2);
+    }
+
+    #[test]
+    fn keeps_unknown_code_unverified() {
+        let mut analysis = analysis();
+        analysis.relocate(&uri(), "");
+        let shown = analysis.warnings(&uri(), Changed::Hide);
+
+        assert_eq!(shown.len(), 2);
+        assert_eq!(shown[0].status, Status::Unverified);
+        assert_eq!(shown[0].range, range(3, 4, 6));
+    }
+
+    #[test]
+    fn parses_timestamps() {
+        let time =
+            |text| parse_time(text).map(|t| t.duration_since(UNIX_EPOCH).unwrap().as_secs_f64());
+        assert_eq!(time("1970-01-01T00:00:00Z"), Some(0.0));
+        assert_eq!(time("2026-07-24T19:11:35Z"), Some(1_784_920_295.0));
+        assert_eq!(time("2026-07-24T19:11:35.5Z"), Some(1_784_920_295.5));
+        assert_eq!(time("2026-07-24T21:11:35+02:00"), Some(1_784_920_295.0));
+        assert_eq!(time("2000-02-29T00:00:00Z"), Some(951_782_400.0));
+        assert_eq!(time("yesterday"), None);
+    }
+}

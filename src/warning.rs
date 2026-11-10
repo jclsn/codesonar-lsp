@@ -508,6 +508,34 @@ mod tests {
     }
 
     #[test]
+    fn marks_warnings_in_changed_code() {
+        let warning = Warning {
+            status: Status::Changed,
+            ..warnings()[0].clone()
+        };
+
+        let diagnostic = warning.to_diagnostic();
+
+        assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(
+            diagnostic.message,
+            "[changed since the analysis] Null pointer dereference of 'p'"
+        );
+    }
+
+    #[test]
+    fn identifies_warnings_without_fingerprint() {
+        let warnings = warnings();
+        assert_eq!(warnings[0].fingerprint.len(), 16);
+        assert_ne!(warnings[0].fingerprint, warnings[1].fingerprint);
+        assert_eq!(
+            warnings[0].fingerprint,
+            self::warnings()[0].fingerprint,
+            "stable"
+        );
+    }
+
+    #[test]
     fn converts_regions() {
         let region = |start_line, start_column, end_line, end_column| Region {
             start_line,
