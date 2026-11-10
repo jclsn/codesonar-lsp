@@ -374,4 +374,48 @@ mod tests {
 
         assert!(explain(&store, &uri, Some("unknown"), None).is_empty());
     }
+
+    fn rule(id: &str, url: &str) -> Rule {
+        Rule {
+            id: id.into(),
+            title: None,
+            relationship: None,
+            url: Some(Url::parse(url).unwrap()),
+        }
+    }
+
+    #[test]
+    fn turns_link_lists_into_rules() {
+        let mut warning = store().get(&Url::from_file_path("/ws/src/main.c").unwrap())[0].clone();
+        warning.help_uri = None;
+        warning.description = Some(
+            "- [ALLOC.DF](http://hub/doc/ALLOC.DF.html)\n- [CWE:415](https://cwe/415/)\n".into(),
+        );
+
+        let explanation = Explanation::new(&warning);
+        assert_eq!(explanation.description, None);
+        assert_eq!(explanation.rules, [rule("CWE:415", "https://cwe/415/")]);
+        assert_eq!(
+            explanation.help_uri.as_ref().map(Url::as_str),
+            Some("http://hub/doc/ALLOC.DF.html")
+        );
+    }
+
+    #[test]
+    fn keeps_other_descriptions() {
+        assert_eq!(link_list("Check pointers **before** use."), None);
+        assert_eq!(link_list("- [CWE:415](https://cwe/415/)\nmore"), None);
+        assert_eq!(link_list(""), None);
+    }
+
+    #[test]
+    fn keeps_the_documentation_link() {
+        let store = store();
+        let warning = &store.get(&Url::from_file_path("/ws/src/main.c").unwrap())[0];
+        let mut explanation = Explanation::new(warning);
+        explanation.set_rules(vec![rule("ALLOC.DF", "http://hub/other.html")]);
+
+        assert!(explanation.rules.is_empty());
+        assert_eq!(explanation.help_uri, warning.help_uri);
+    }
 }

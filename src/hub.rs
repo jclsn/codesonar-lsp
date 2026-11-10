@@ -585,6 +585,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gets_the_rules_of_a_warning() {
+        let server = MockServer::start().await;
+
+        mount_json(
+            &server,
+            "/warninginstance/305.json",
+            json!({"categories": [
+                {"link": "ALLOC.DF", "url": "/doc/ALLOC.DF.html", "relationship": null, "rule_text": null},
+                {"link": "CWE:415", "url": "https://links.example.com/cwe/415/",
+                 "relationship": "intersects", "rule_text": "Double Free"},
+                {"link": "", "url": ""},
+            ]}),
+        )
+        .await;
+
+        let hub = Hub::new(&config(&server, "")).unwrap();
+        let rules = hub.warning_rules(305).await.unwrap();
+
+        assert_eq!(
+            rules,
+            [
+                Rule {
+                    id: "ALLOC.DF".into(),
+                    title: None,
+                    relationship: None,
+                    url: Some(Url::parse(&format!("{}/doc/ALLOC.DF.html", server.uri())).unwrap()),
+                },
+                Rule {
+                    id: "CWE:415".into(),
+                    title: Some("Double Free".into()),
+                    relationship: Some("intersects".into()),
+                    url: Some(Url::parse("https://links.example.com/cwe/415/").unwrap()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn finds_warning_instance_ids() {
+        let id = |url: &str| warning_instance_id(&Url::parse(url).unwrap());
+        assert_eq!(id("http://hub:7340/warninginstance/305.html"), Some(305));
+        assert_eq!(id("http://hub:7340/analysis/305.html"), None);
+        assert_eq!(id("http://hub:7340/warninginstance/x.html"), None);
+    }
+
+    #[tokio::test]
     async fn lists_analyses_of_a_project() {
         let server = MockServer::start().await;
 

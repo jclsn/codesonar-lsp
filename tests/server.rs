@@ -564,6 +564,14 @@ fn mock_hub(runtime: &tokio::runtime::Runtime, time: &str) -> MockServer {
             json!({"rows": [{"file": "/build/src/main.c", "url": "/analysis/3-file1.json"}]}),
         ),
         ("/analysis/3-file1.json", json!({"children": source})),
+        (
+            "/warninginstance/12.json",
+            json!({"categories": [
+                {"link": "LANG.MEM.NPD", "url": "/doc/NPD.html", "relationship": null, "rule_text": null},
+                {"link": "CWE:476", "url": "https://cwe/476/", "relationship": "intersects",
+                 "rule_text": "NULL Pointer Dereference"},
+            ]}),
+        ),
     ];
 
     runtime.block_on(async {
@@ -652,6 +660,27 @@ fn chooses_analyses_with_commands() {
 
     let projects = client.command("codesonar.projects", Value::Null);
     assert_eq!(projects, json!([{"id": 1, "name": "test"}]));
+
+    client.shutdown();
+}
+
+#[test]
+fn explains_rules_with_titles_from_the_hub() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut client = Client::initialize(dir.path(), hub_options(dir.path(), &hub));
+    client.expect("codesonar/loaded", |_| true);
+
+    let main = uri(dir.path().join("src/main.c"));
+    let range = json!({"start": {"line": 4, "character": 0}, "end": {"line": 5, "character": 0}});
+    let explanations = client.command("codesonar.explain", json!({"uri": main, "range": range}));
+
+    assert_eq!(
+        explanations[0]["rules"],
+        json!([{"id": "CWE:476", "title": "NULL Pointer Dereference",
+                "relationship": "intersects", "url": "https://cwe/476/"}])
+    );
 
     client.shutdown();
 }
