@@ -16,7 +16,7 @@ use crate::analysis::{self, Analysis};
 use crate::analyze;
 use crate::code_action;
 use crate::commands::{
-    self, AnalyzeArgs, ConnectArgs, LoadArgs, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND,
+    self, AnalyzeArgs, ConnectArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND,
 };
 use crate::config::{Config, expand_home};
 use crate::hover;
@@ -531,6 +531,16 @@ impl Backend {
         }
     }
 
+    async fn explain(&self, args: ExplainArgs) -> Value {
+        let state = self.state.read().await;
+        json!(hover::explain(
+            &state.store,
+            &args.uri,
+            args.fingerprint.as_deref(),
+            args.range,
+        ))
+    }
+
     async fn open_in_hub(&self, arguments: &[Value]) -> Result<()> {
         let uri = arguments
             .first()
@@ -733,6 +743,7 @@ impl LanguageServer for Backend {
             commands::PROJECTS => self.projects().await,
             commands::ANALYSES => self.analyses().await,
             commands::LOAD => self.load_command(parse(arguments)?).await,
+            commands::EXPLAIN_COMMAND => Ok(self.explain(required(arguments)?).await),
             commands::STATUS => Ok(self.state.read().await.status()),
             commands::WARNINGS => Ok(self.state.read().await.warnings()),
             commands::ANALYZE_COMMAND => self.analyze_command(parse(arguments)?).await,
@@ -747,6 +758,13 @@ impl LanguageServer for Backend {
             data: None,
         })
     }
+}
+
+fn required<T: for<'de> serde::Deserialize<'de>>(arguments: &[Value]) -> Result<T> {
+    let argument = arguments
+        .first()
+        .ok_or_else(|| Error::invalid_params("missing argument"))?;
+    T::deserialize(argument).map_err(|error| Error::invalid_params(error.to_string()))
 }
 
 fn parse<T: Default + for<'de> serde::Deserialize<'de>>(arguments: &[Value]) -> Result<T> {

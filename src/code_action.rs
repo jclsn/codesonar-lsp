@@ -1,6 +1,6 @@
 //! Quick fixes and other code actions for warnings.
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Command, Range, Url, WorkspaceEdit,
 };
@@ -11,6 +11,8 @@ use crate::store::Store;
 pub const REFRESH_COMMAND: &str = "codesonar.refresh";
 /// Opens a warning on the hub. Takes the warning URL as argument.
 pub const OPEN_IN_HUB_COMMAND: &str = "codesonar.openInHub";
+/// Explains warnings, see [`crate::commands::ExplainArgs`].
+pub const EXPLAIN_COMMAND: &str = "codesonar.explain";
 
 pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
@@ -31,6 +33,24 @@ pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrC
                 ..CodeAction::default()
             }));
         }
+
+        let title = format!(
+            "Show details for {}",
+            warning.rule_id.as_deref().unwrap_or("warning")
+        );
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title: title.clone(),
+            kind: Some(CodeActionKind::EMPTY),
+            diagnostics: Some(vec![diagnostic.clone()]),
+            command: Some(Command {
+                title,
+                command: EXPLAIN_COMMAND.to_string(),
+                arguments: Some(vec![
+                    json!({"uri": warning.uri, "fingerprint": warning.fingerprint}),
+                ]),
+            }),
+            ..CodeAction::default()
+        }));
 
         if let Some(hub_uri) = &warning.hub_uri {
             let title = format!(
@@ -92,7 +112,7 @@ mod tests {
     #[test]
     fn offers_quick_fix() {
         let actions = actions("/ws/src/main.c", 4);
-        assert_eq!(actions.len(), 2);
+        assert_eq!(actions.len(), 3);
 
         let fix = &actions[0];
         assert_eq!(fix.title, "Check 'p' for NULL");
@@ -112,7 +132,8 @@ mod tests {
     #[test]
     fn offers_open_in_hub() {
         let actions = actions("/ws/src/main.c", 4);
-        let open = &actions[1];
+        let open = &actions[2];
+
         assert_eq!(open.title, "Open LANG.MEM.NPD in CodeSonar Hub");
         assert!(open.edit.is_none());
 
@@ -127,8 +148,10 @@ mod tests {
     }
 
     #[test]
-    fn offers_nothing_without_fixes_or_hub() {
-        assert!(actions("/ws/src/util file.c", 9).is_empty());
-        assert!(actions("/ws/src/main.c", 0).is_empty());
+    fn offers_only_explanation_without_fixes_or_hub() {
+        let actions = actions("/ws/src/util file.c", 9);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].title, "Show details for MISC.FMT");
+        assert!(self::actions("/ws/src/main.c", 0).is_empty());
     }
 }

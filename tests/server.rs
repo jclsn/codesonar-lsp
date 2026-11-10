@@ -266,14 +266,15 @@ fn offers_quick_fix_and_opens_hub() {
         "textDocument/codeAction",
         json!({"textDocument": {"uri": main}, "range": range, "context": {"diagnostics": []}}),
     );
+
     let actions = actions.as_array().unwrap();
-    assert_eq!(actions.len(), 2);
+    assert_eq!(actions.len(), 3);
     assert_eq!(actions[0]["kind"], "quickfix");
     assert_eq!(actions[0]["title"], "Check 'p' for NULL");
     let edits = &actions[0]["edit"]["changes"][main.as_str().unwrap()];
     assert_eq!(edits[0]["newText"], "if (p) ");
 
-    let command = actions[1]["command"].clone();
+    let command = actions[2]["command"].clone();
     let result = client.request(
         "workspace/executeCommand",
         json!({"command": command["command"], "arguments": command["arguments"]}),

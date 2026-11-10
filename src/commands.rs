@@ -6,8 +6,9 @@
 use serde::Deserialize;
 use serde_json::Value;
 use tower_lsp::lsp_types::notification::Notification;
+use tower_lsp::lsp_types::{Range, Url};
 
-pub use crate::code_action::{OPEN_IN_HUB_COMMAND, REFRESH_COMMAND};
+pub use crate::code_action::{EXPLAIN_COMMAND, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND};
 
 /// Sets the hub and signs in: `{url, username, password, project}`, all
 /// optional. Returns the hub projects.
@@ -29,9 +30,10 @@ pub const WARNINGS: &str = "codesonar.warnings";
 /// optional. Returns `{command, cwd, temporaryFiles}`.
 pub const ANALYZE_COMMAND: &str = "codesonar.analyzeCommand";
 
-pub const ALL: [&str; 9] = [
+pub const ALL: [&str; 10] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
+    EXPLAIN_COMMAND,
     CONNECT,
     PROJECTS,
     ANALYSES,
@@ -72,6 +74,17 @@ pub struct LoadArgs {
 #[serde(default)]
 pub struct AnalyzeArgs {
     pub name: Option<String>,
+}
+
+/// Explains the warnings of a file: `{uri, fingerprint}` picks one by its
+/// fingerprint, `{uri, range}` those in a range. Returns
+/// `[{title, ruleId, message, description, status, related: [{uri, line,
+/// message}], helpUri, hubUri, markdown}]`.
+#[derive(Debug, Deserialize)]
+pub struct ExplainArgs {
+    pub uri: Url,
+    pub fingerprint: Option<String>,
+    pub range: Option<Range>,
 }
 
 /// Parses the first argument of a command; a missing one is the default.

@@ -1,9 +1,89 @@
-//! Explanations of warnings, shown on hover.
+//! Explanations of warnings, shown on hover and by the explain command.
 
-use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Url};
+use serde::Serialize;
+use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range, Url};
 
 use crate::store::Store;
+use crate::tracking::Status;
 use crate::warning::Warning;
+
+/// The parts of an explanation, for clients that render it themselves.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Explanation {
+    pub title: String,
+    pub rule_id: Option<String>,
+    pub message: String,
+    pub description: Option<String>,
+    pub status: Status,
+    pub related: Vec<Related>,
+    pub help_uri: Option<Url>,
+    pub hub_uri: Option<Url>,
+    /// The whole explanation as Markdown, as shown on hover.
+    pub markdown: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Related {
+    pub uri: Url,
+    /// 1-based line.
+    pub line: u32,
+    pub message: String,
+}
+
+impl Explanation {
+    pub fn new(warning: &Warning) -> Self {
+        Self {
+            // CodeSonar exports often name the warning class by its id.
+            title: warning
+                .rule_name
+                .as_deref()
+                .or(warning.rule_id.as_deref())
+                .unwrap_or("Warning")
+                .to_string(),
+            rule_id: warning.rule_id.clone(),
+            message: warning.message.clone(),
+            description: warning.description.clone(),
+            status: warning.status,
+            related: warning
+                .related
+                .iter()
+                .map(|related| Related {
+                    uri: related.location.uri.clone(),
+                    line: related.location.range.start.line + 1,
+                    message: related.message.clone(),
+                })
+                .collect(),
+            help_uri: warning.help_uri.clone(),
+            hub_uri: warning.hub_uri.clone(),
+            markdown: explanation(warning),
+        }
+    }
+}
+
+/// Explanations of the warnings of a file, picked by fingerprint or else
+/// by range.
+pub fn explain(
+    store: &Store,
+    uri: &Url,
+    fingerprint: Option<&str>,
+    range: Option<Range>,
+) -> Vec<Explanation> {
+    let warnings: Vec<&Warning> = match (fingerprint, range) {
+        (Some(fingerprint), _) => store
+            .get(uri)
+            .iter()
+            .filter(|warning| warning.fingerprint == fingerprint)
+            .collect(),
+        (None, Some(range)) => store.overlapping(uri, range),
+        (None, None) => store.get(uri).iter().collect(),
+    };
+    warnings.into_iter().map(Explanation::new).collect()
+}
+
+fn title(warning: &Warning) -> &str {
+    warning.rule_name.as_deref().unwrap_or("Warning")
+}
 
 pub fn hover(store: &Store, uri: &Url, position: Position) -> Option<Hover> {
     let warnings = store.at(uri, position);
@@ -28,10 +108,7 @@ pub fn hover(store: &Store, uri: &Url, position: Position) -> Option<Hover> {
 
 /// Markdown explanation of a single warning.
 pub fn explanation(warning: &Warning) -> String {
-    let mut title = format!(
-        "**CodeSonar: {}**",
-        warning.rule_name.as_deref().unwrap_or("Warning")
-    );
+    let mut title = format!("**CodeSonar: {}**", title(warning));
 
     if let Some(id) = &warning.rule_id {
         title.push_str(&format!(" (`{id}`)"));
