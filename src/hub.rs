@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use crate::config::HubConfig;
 use crate::sarif::Log;
+use crate::warning::Rule;
 
 pub struct Hub {
     client: Client,
@@ -156,6 +157,30 @@ impl Hub {
         Ok(source_lines(&self.json(url).await?))
     }
 
+    /// The rules a warning instance relates to, with their titles.
+    pub async fn warning_rules(&self, instance_id: u64) -> anyhow::Result<Vec<Rule>> {
+        let value = self
+            .json(&format!("/warninginstance/{instance_id}.json"))
+            .await?;
+        let categories = value
+            .get("categories")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(categories
+            .iter()
+            .map(|category| Rule {
+                id: text(category, "link"),
+                title: Some(text(category, "rule_text")).filter(|t| !t.is_empty()),
+                relationship: Some(text(category, "relationship")).filter(|r| !r.is_empty()),
+                url: Some(text(category, "url"))
+                    .filter(|url| !url.is_empty())
+                    .and_then(|url| self.url(&url).ok()),
+            })
+            .filter(|rule| !rule.id.is_empty())
+            .collect())
+    }
+
     /// The page of an analysis.
     pub fn analysis_url(&self, analysis_id: &str) -> anyhow::Result<Url> {
         self.url(&format!("/analysis/{analysis_id}.html"))
@@ -278,6 +303,14 @@ pub fn find_file<'a>(
         .filter(|(shared, _)| *shared > 0)
         .max_by_key(|(shared, _)| *shared)
         .map(|(_, file)| file)
+}
+
+/// The id of a warning instance from its URL, like
+/// `/warninginstance/305.html`.
+pub fn warning_instance_id(url: &Url) -> Option<u64> {
+    let mut segments = url.path_segments()?.rev();
+    let id = segments.next()?.strip_suffix(".html")?.parse().ok()?;
+    (segments.next()? == "warninginstance").then_some(id)
 }
 
 /// The id in hub URLs like `/project/12.json`.

@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 
 use crate::store::Store;
 use crate::tracking::Status;
-use crate::warning::Warning;
+use crate::warning::{Rule, Warning};
 
 /// The parts of an explanation, for clients that render it themselves.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -18,6 +18,8 @@ pub struct Explanation {
     pub status: Status,
     pub related: Vec<Related>,
     pub events: Vec<ExplainedEvent>,
+    /// The rules of coding standards the warning relates to.
+    pub rules: Vec<Rule>,
     pub help_uri: Option<Url>,
     pub hub_uri: Option<Url>,
     /// The whole explanation as Markdown, as shown on hover.
@@ -45,7 +47,9 @@ pub struct ExplainedEvent {
 
 impl Explanation {
     pub fn new(warning: &Warning) -> Self {
-        Self {
+        // CodeSonar exports the rules as the description of the warning class.
+        let rules = warning.description.as_deref().and_then(link_list);
+        let mut explanation = Self {
             // CodeSonar exports often name the warning class by its id.
             title: warning
                 .rule_name
@@ -55,7 +59,7 @@ impl Explanation {
                 .to_string(),
             rule_id: warning.rule_id.clone(),
             message: warning.message.clone(),
-            description: warning.description.clone(),
+            description: warning.description.clone().filter(|_| rules.is_none()),
             status: warning.status,
             related: warning
                 .related
@@ -77,11 +81,46 @@ impl Explanation {
                     depth: event.depth,
                 })
                 .collect(),
+            rules: Vec::new(),
             help_uri: warning.help_uri.clone(),
             hub_uri: warning.hub_uri.clone(),
             markdown: explanation(warning),
-        }
+        };
+        explanation.set_rules(rules.unwrap_or_default());
+        explanation
     }
+
+    /// Sets the rules. The link of the warning class becomes the
+    /// documentation link, if there is none yet.
+    pub fn set_rules(&mut self, rules: Vec<Rule>) {
+        let (classes, rules): (Vec<Rule>, Vec<Rule>) =
+            rules.into_iter().partition(Rule::is_warning_class);
+
+        if self.help_uri.is_none() {
+            self.help_uri = classes.into_iter().find_map(|class| class.url);
+        }
+
+        self.rules = rules;
+    }
+}
+
+/// The rules of a description that is only a Markdown list of links.
+fn link_list(markdown: &str) -> Option<Vec<Rule>> {
+    let rules = markdown
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let (id, rest) = line.strip_prefix("- [")?.split_once("](")?;
+            Some(Rule {
+                id: id.to_string(),
+                title: None,
+                relationship: None,
+                url: Url::parse(rest.strip_suffix(')')?).ok(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!rules.is_empty()).then_some(rules)
 }
 
 /// Explanations of the warnings of a file, picked by fingerprint or else

@@ -39,6 +39,27 @@ pub struct Warning {
     pub status: Status,
 }
 
+/// A rule of a coding standard, or the warning class itself, that a
+/// warning relates to, e.g. `CWE:415`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Rule {
+    pub id: String,
+    /// E.g. "Double Free". Only the hub knows it.
+    pub title: Option<String>,
+    /// How the warning relates to the rule: `intersects` if it may violate
+    /// it, `follows` if it may be a symptom of an earlier violation.
+    pub relationship: Option<String>,
+    pub url: Option<Url>,
+}
+
+impl Rule {
+    /// Whether this is the documentation of the warning class, like
+    /// `ALLOC.DF`, rather than a rule of a standard, like `CWE:415`.
+    pub fn is_warning_class(&self) -> bool {
+        !self.id.contains(':')
+    }
+}
+
 /// A step on the path to a warning, e.g. where a pointer is freed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {

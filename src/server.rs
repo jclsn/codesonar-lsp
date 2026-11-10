@@ -25,7 +25,7 @@ use crate::memory::{self, Memory};
 use crate::source::{self, Selection};
 use crate::store::Store;
 use crate::tracking::Anchor;
-use crate::warning::{self, Warning};
+use crate::warning::{self, Rule, Warning};
 
 const WATCH_PATTERN: &str = "**/*.sarif";
 
@@ -33,6 +33,8 @@ pub struct Backend {
     client: Client,
     state: RwLock<State>,
     reload_lock: Mutex<()>,
+    /// The rules of warnings, by their hub URL.
+    rules: Mutex<HashMap<Url, Vec<Rule>>>,
 }
 
 struct Document {
@@ -159,6 +161,7 @@ impl Backend {
             client,
             state: RwLock::default(),
             reload_lock: Mutex::default(),
+            rules: Mutex::default(),
         }
     }
 
@@ -531,14 +534,54 @@ impl Backend {
         }
     }
 
+    /// Explains warnings, with the titles of their rules from the hub.
     async fn explain(&self, args: ExplainArgs) -> Value {
-        let state = self.state.read().await;
-        json!(hover::explain(
-            &state.store,
-            &args.uri,
-            args.fingerprint.as_deref(),
-            args.range,
-        ))
+        let (mut explanations, hub) = {
+            let state = self.state.read().await;
+            let explanations = hover::explain(
+                &state.store,
+                &args.uri,
+                args.fingerprint.as_deref(),
+                args.range,
+            );
+            (explanations, state.hub.clone())
+        };
+
+        if let Some(hub) = hub {
+            for explanation in &mut explanations {
+                if let Some(rules) = self.warning_rules(&hub, explanation.hub_uri.as_ref()).await {
+                    explanation.set_rules(rules);
+                }
+            }
+        }
+
+        json!(explanations)
+    }
+
+    async fn warning_rules(&self, hub: &Hub, hub_uri: Option<&Url>) -> Option<Vec<Rule>> {
+        let hub_uri = hub_uri?;
+        let id = hub::warning_instance_id(hub_uri)?;
+
+        if let Some(rules) = self.rules.lock().await.get(hub_uri) {
+            return Some(rules.clone());
+        }
+
+        match hub.warning_rules(id).await {
+            Ok(rules) => {
+                self.rules
+                    .lock()
+                    .await
+                    .insert(hub_uri.clone(), rules.clone());
+                Some(rules)
+            }
+            Err(error) => {
+                self.warn(format!(
+                    "could not get the rules of warning {id}: {error:#}"
+                ))
+                .await;
+                None
+            }
+        }
     }
 
     async fn open_in_hub(&self, arguments: &[Value]) -> Result<()> {

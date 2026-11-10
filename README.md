@@ -24,7 +24,9 @@ and editor clients that build on it.
 - **Explanations** on hover: warning class, message, description and links to
   the documentation and to the warning on the hub.
 - **Explain** as a code action: the explanation as structured data, for
-  clients that show it in their own view.
+  clients that show it in their own view. It includes the events that lead
+  to the warning and the rules it may violate, with their titles from the
+  hub.
 - **Quick fixes**, if the SARIF export contains fixes.
 - **Open in CodeSonar Hub** as a code action.
 - **Commands** for clients: sign in to a hub, list projects and analyses,
@@ -115,7 +117,7 @@ argument, an object.
 | `codesonar.status`          |                                                  | `{loaded, name, key, hubId, url, total, shown, counts}` |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
-| `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, helpUri, hubUri, markdown}]` |
+| `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |
 | `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |
 
