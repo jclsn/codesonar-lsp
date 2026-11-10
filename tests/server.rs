@@ -713,6 +713,34 @@ fn connects_to_a_hub() {
 }
 
 #[test]
+fn creates_the_project_configuration() {
+    let dir = workspace();
+    let install = dir.path().join("install");
+    std::fs::create_dir_all(install.join("bin")).unwrap();
+    std::fs::write(install.join("bin/codesonar"), "").unwrap();
+    std::fs::write(install.join("template.conf"), "# template\n").unwrap();
+
+    let mut options = options(dir.path());
+    options["analyze"] = json!({"command": install.join("bin/codesonar"), "projectFile": "cs/app"});
+
+    let mut client = Client::initialize(dir.path(), options);
+
+    let project = client.command("codesonar.project", Value::Null);
+    let conf = dir.path().join("cs/app.conf");
+    assert_eq!(project["prefix"], json!(dir.path().join("cs/app")));
+    assert_eq!(project["conf"], json!(conf));
+    assert_eq!(project["confExists"], false);
+    assert!(!conf.exists());
+
+    let project = client.command("codesonar.project", json!({"createConf": true}));
+    assert_eq!(project["created"], true);
+    assert_eq!(project["confExists"], true);
+    assert_eq!(std::fs::read_to_string(conf).unwrap(), "# template\n");
+
+    client.shutdown();
+}
+
+#[test]
 fn returns_analyze_command() {
     let dir = workspace();
     let mut options = options(dir.path());

@@ -257,4 +257,66 @@ mod tests {
         assert!(root.path().join("build/cs").is_dir());
         assert!(!root.path().join("build/cs/project").exists());
     }
+
+    /// A CodeSonar installation with a template, linked from `bin`.
+    fn install(dir: &Path) -> PathBuf {
+        let install = dir.join("opt/codesonar");
+        std::fs::create_dir_all(install.join("bin")).unwrap();
+        std::fs::write(install.join("bin/codesonar"), "").unwrap();
+        std::fs::write(install.join("template.conf"), "# template\n").unwrap();
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(install.join("bin/codesonar"), dir.join("bin/codesonar"))
+            .unwrap();
+        install.join("bin/codesonar")
+    }
+
+    #[test]
+    fn names_the_project_files_after_the_prefix() {
+        let config = Config::from_value(&json!({"analyze": {"projectFile": "cs/app"}})).unwrap();
+        let prefix = prefix(&config, Path::new("/ws"));
+        assert_eq!(prefix, Path::new("/ws/cs/app"));
+        assert_eq!(conf_file(&prefix), Path::new("/ws/cs/app.conf"));
+    }
+
+    #[test]
+    fn finds_the_template_of_the_installation() {
+        let dir = tempfile::tempdir().unwrap();
+        let command = install(dir.path());
+        let expected = dir.path().join("opt/codesonar/template.conf");
+
+        assert_eq!(template(command.to_str().unwrap()), Some(expected.clone()));
+
+        #[cfg(unix)]
+
+        assert_eq!(
+            template(dir.path().join("bin/codesonar").to_str().unwrap()),
+            Some(expected.canonicalize().unwrap())
+        );
+        assert_eq!(template("/nonexistent/bin/codesonar"), None);
+    }
+
+    #[test]
+    fn creates_the_configuration_from_the_template() {
+        let dir = tempfile::tempdir().unwrap();
+        let command = install(dir.path());
+        let root = dir.path().join("ws");
+        let config = Config::from_value(&json!({"analyze": {"command": command}})).unwrap();
+
+        assert!(create_conf(&config, &root).unwrap());
+        let conf = root.join(".codesonar/project.conf");
+        assert_eq!(std::fs::read_to_string(&conf).unwrap(), "# template\n");
+
+        std::fs::write(&conf, "edited\n").unwrap();
+
+        assert!(
+            !create_conf(&config, &root).unwrap(),
+            "keeps an existing file"
+        );
+        assert_eq!(std::fs::read_to_string(&conf).unwrap(), "edited\n");
+
+        let config = Config::from_value(&json!({"analyze": {"command": "/nonexistent"}})).unwrap();
+        let error = create_conf(&config, &dir.path().join("other")).unwrap_err();
+        assert!(error.to_string().contains("template.conf"), "{error}");
+    }
 }
