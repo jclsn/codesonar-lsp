@@ -133,7 +133,9 @@ argument, an object.
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |
 | `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |
 
-After an analysis was shown, the server sends the notification
+When an analysis starts loading, the server sends the notification
+`codesonar/loading` with `{analysis}`, `{project}` or `{file}`. Large
+analyses take a minute. After an analysis was shown, it sends
 `codesonar/loaded` with the status.
 
 ## Other editors

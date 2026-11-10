@@ -249,6 +249,7 @@ impl Backend {
             )
         };
 
+        self.loading(&config, root.as_deref(), &selection).await;
         let Some(loaded) =
             source::load(&config, root.as_deref(), hub.as_deref(), selection.clone()).await?
         else {
@@ -294,6 +295,22 @@ impl Backend {
         }
 
         Ok(())
+    }
+
+    /// Tells the client what starts loading.
+    async fn loading(&self, config: &Config, root: Option<&Path>, selection: &Selection) {
+        let hub = config.hub.as_ref();
+        let params = match source::resolve(config, root, selection.clone()) {
+            Some(Selection::Hub(id)) => json!({"analysis": id}),
+            Some(Selection::File(file)) => json!({"file": file}),
+            Some(Selection::Latest | Selection::Configured) => {
+                json!({"project": hub.and_then(|hub| hub.project.as_ref())})
+            }
+            None => return,
+        };
+        self.client
+            .send_notification::<commands::Loading>(params)
+            .await;
     }
 
     /// Detects the CodeSonar project of the workspace: its project files

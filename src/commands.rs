@@ -64,6 +64,16 @@ impl Notification for Loaded {
     const METHOD: &'static str = "codesonar/loaded";
 }
 
+/// Sent when an analysis starts loading, which can take a minute for large
+/// ones: `{analysis}` with its hub id, `{project}` for its newest analysis
+/// or `{file}` for a SARIF file.
+pub enum Loading {}
+
+impl Notification for Loading {
+    type Params = Value;
+    const METHOD: &'static str = "codesonar/loading";
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct ConnectArgs {

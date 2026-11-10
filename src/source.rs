@@ -38,16 +38,8 @@ pub async fn load(
     hub: Option<&Hub>,
     selection: Selection,
 ) -> anyhow::Result<Option<Loaded>> {
-    let selection = match selection {
-        Selection::Configured => match (&config.hub, config.sarif_file(root)) {
-            (Some(hub), _) if !hub.analysis_id.is_empty() => {
-                Selection::Hub(hub.analysis_id.clone())
-            }
-            (Some(_), _) => Selection::Latest,
-            (None, Some(file)) => Selection::File(file),
-            (None, None) => return Ok(None),
-        },
-        selection => selection,
+    let Some(selection) = resolve(config, root, selection) else {
+        return Ok(None);
     };
 
     match selection {
@@ -71,6 +63,21 @@ pub async fn load(
                 .map(Some)
         }
     }
+}
+
+/// What the configured selection means. `None` if nothing is configured.
+pub fn resolve(config: &Config, root: Option<&Path>, selection: Selection) -> Option<Selection> {
+    Some(match selection {
+        Selection::Configured => match (&config.hub, config.sarif_file(root)) {
+            (Some(hub), _) if !hub.analysis_id.is_empty() => {
+                Selection::Hub(hub.analysis_id.clone())
+            }
+            (Some(_), _) => Selection::Latest,
+            (None, Some(file)) => Selection::File(file),
+            (None, None) => return None,
+        },
+        selection => selection,
+    })
 }
 
 async fn load_hub(
