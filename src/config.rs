@@ -210,6 +210,38 @@ mod tests {
     }
 
     #[test]
+    fn reads_password_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("password");
+        std::fs::write(&file, "secret\nignored\n").unwrap();
+
+        let hub = HubConfig {
+            password_file: Some(file.clone()),
+            ..HubConfig::default()
+        };
+        assert_eq!(hub.password().as_deref(), Some("secret"));
+
+        let hub = HubConfig {
+            password: Some("direct".into()),
+            ..hub
+        };
+        assert_eq!(hub.password().as_deref(), Some("direct"));
+
+        let hub = HubConfig {
+            password_file: Some(dir.path().join("missing")),
+            ..HubConfig::default()
+        };
+        assert_eq!(hub.password(), None);
+    }
+
+    #[test]
+    fn expands_home() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_home(Path::new("~/a")), Path::new(&home).join("a"));
+        assert_eq!(expand_home(Path::new("/a/~")), Path::new("/a/~"));
+    }
+
+    #[test]
     fn normalizes_windows_paths() {
         assert_eq!(normalize("/C:/a"), "C:/a");
         assert_eq!(normalize("D:\\a\\b"), "D:/a/b");
