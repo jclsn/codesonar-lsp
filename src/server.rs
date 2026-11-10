@@ -16,7 +16,8 @@ use crate::analysis::{self, Analysis};
 use crate::analyze;
 use crate::code_action;
 use crate::commands::{
-    self, AnalyzeArgs, ConnectArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND,
+    self, AnalyzeArgs, ConnectArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs,
+    REFRESH_COMMAND,
 };
 use crate::config::{Config, expand_home};
 use crate::hover;
@@ -511,6 +512,20 @@ impl Backend {
         Ok(json!(command))
     }
 
+    async fn project(&self, args: ProjectArgs) -> anyhow::Result<Value> {
+        let state = self.state.read().await;
+        let root = state.root.as_deref().context("no workspace folder")?;
+        let created = args.create_conf && analyze::create_conf(&state.config, root)?;
+        let prefix = analyze::prefix(&state.config, root);
+        let conf = analyze::conf_file(&prefix);
+        Ok(json!({
+            "prefix": prefix,
+            "confExists": conf.exists(),
+            "conf": conf,
+            "created": created,
+        }))
+    }
+
     async fn watch_files(&self) {
         let options = DidChangeWatchedFilesRegistrationOptions {
             watchers: vec![FileSystemWatcher {
@@ -790,6 +805,7 @@ impl LanguageServer for Backend {
             commands::STATUS => Ok(self.state.read().await.status()),
             commands::WARNINGS => Ok(self.state.read().await.warnings()),
             commands::ANALYZE_COMMAND => self.analyze_command(parse(arguments)?).await,
+            commands::PROJECT => self.project(parse(arguments)?).await,
             command => {
                 return Err(Error::invalid_params(format!("unknown command {command}")));
             }

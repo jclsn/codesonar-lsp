@@ -29,8 +29,12 @@ pub const WARNINGS: &str = "codesonar.warnings";
 /// Returns the command line of an analysis of the workspace: `{name}` is
 /// optional. Returns `{command, cwd, temporaryFiles}`.
 pub const ANALYZE_COMMAND: &str = "codesonar.analyzeCommand";
+/// Returns the CodeSonar project of the workspace: `{prefix, conf,
+/// confExists, created}`. With `{createConf: true}`, the configuration file
+/// is created from CodeSonar's template if it does not exist.
+pub const PROJECT: &str = "codesonar.project";
 
-pub const ALL: [&str; 10] = [
+pub const ALL: [&str; 11] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
@@ -41,6 +45,7 @@ pub const ALL: [&str; 10] = [
     STATUS,
     WARNINGS,
     ANALYZE_COMMAND,
+    PROJECT,
 ];
 
 /// Sent after an analysis was loaded and once more after the analyzed
@@ -74,6 +79,12 @@ pub struct LoadArgs {
 #[serde(default)]
 pub struct AnalyzeArgs {
     pub name: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProjectArgs {
+    pub create_conf: bool,
 }
 
 /// Explains the warnings of a file: `{uri, fingerprint}` picks one by its

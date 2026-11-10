@@ -86,6 +86,70 @@ pub fn command(config: &Config, root: &Path, name: Option<&str>) -> anyhow::Resu
     })
 }
 
+/// The project prefix: CodeSonar names the project files after it, e.g.
+/// `<prefix>.conf` and `<prefix>.prj_files`.
+pub fn prefix(config: &Config, root: &Path) -> PathBuf {
+    root.join(expand_home(&config.analyze.project_file))
+}
+
+/// The configuration file of the project.
+pub fn conf_file(prefix: &Path) -> PathBuf {
+    let mut file = prefix.as_os_str().to_owned();
+    file.push(".conf");
+    file.into()
+}
+
+/// Creates the configuration file of the project from CodeSonar's
+/// template, as the first analysis would. Returns whether it was created.
+pub fn create_conf(config: &Config, root: &Path) -> anyhow::Result<bool> {
+    let conf = conf_file(&prefix(config, root));
+
+    if conf.exists() {
+        return Ok(false);
+    }
+
+    let template = template(&config.analyze.command).with_context(|| {
+        format!(
+            "cannot find the template.conf of {}",
+            config.analyze.command
+        )
+    })?;
+    create_dir(&conf)?;
+    std::fs::copy(&template, &conf)
+        .with_context(|| format!("cannot copy {} to {}", template.display(), conf.display()))?;
+    Ok(true)
+}
+
+/// CodeSonar creates the project files, but not their directory.
+fn create_dir(file: &Path) -> anyhow::Result<()> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    }
+
+    Ok(())
+}
+
+/// The `template.conf` of a CodeSonar installation, which is next to the
+/// `bin` directory of the command.
+fn template(command: &str) -> Option<PathBuf> {
+    let command = expand_home(Path::new(command));
+    let command = if command.components().count() > 1 {
+        command
+    } else {
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(&command))
+            .find(|path| path.is_file())?
+    };
+    // The command is often a link into the installation.
+    let resolved = command.canonicalize().ok();
+
+    [Some(command), resolved]
+        .into_iter()
+        .flatten()
+        .filter_map(|path| Some(path.parent()?.parent()?.join("template.conf")))
+        .find(|template| template.is_file())
+}
+
 /// Writes the password to a file only the user can read.
 fn password_file(password: &str) -> anyhow::Result<PathBuf> {
     let mut file = tempfile::Builder::new()
