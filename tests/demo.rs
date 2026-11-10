@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use codesonar_lsp::config::Config;
-use codesonar_lsp::source;
-use codesonar_lsp::warning::Warning;
+use codesonar_lsp::source::{self, Selection};
+use codesonar_lsp::warning::{self, Warning};
 use tower_lsp::lsp_types::{Position, TextEdit, Url};
 
 fn demo() -> &'static Path {
@@ -16,7 +16,11 @@ async fn warnings() -> Vec<Warning> {
         sarif_file: Some("codesonar.sarif".into()),
         ..Config::default()
     };
-    source::load(&config, Some(demo())).await.unwrap().unwrap()
+    let loaded = source::load(&config, Some(demo()), None, Selection::Configured)
+        .await
+        .unwrap()
+        .unwrap();
+    warning::from_log(&loaded.log, &config, Some(demo()))
 }
 
 fn source() -> String {

@@ -28,6 +28,15 @@ impl Store {
             .map(|(uri, warnings)| (uri, warnings.as_slice()))
     }
 
+    /// Replaces the warnings of a file.
+    pub fn set(&mut self, uri: &Url, warnings: Vec<Warning>) {
+        if warnings.is_empty() {
+            self.files.remove(uri);
+        } else {
+            self.files.insert(uri.clone(), warnings);
+        }
+    }
+
     pub fn get(&self, uri: &Url) -> &[Warning] {
         self.files.get(uri).map_or(&[], Vec::as_slice)
     }
@@ -77,6 +86,8 @@ mod tests {
             hub_uri: None,
             related: Vec::new(),
             fixes: Vec::new(),
+            fingerprint: String::new(),
+            status: Default::default(),
         }
     }
 

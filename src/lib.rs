@@ -1,5 +1,6 @@
 //! A language server that shows CodeSonar warnings in the editor.
 
+pub mod analysis;
 pub mod code_action;
 pub mod config;
 pub mod hover;

@@ -20,6 +20,20 @@ pub struct Config {
     pub hub: Option<HubConfig>,
     /// Rewrites paths from the analysis machine to local paths.
     pub path_mappings: Vec<PathMapping>,
+    /// How warnings in code changed since the analysis are shown.
+    pub changed: Changed,
+    /// Directory of the memory of analyzed code.
+    pub state_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Changed {
+    /// Leave them out: they are usually fixed.
+    #[default]
+    Hide,
+    /// Show them as hints.
+    Mark,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

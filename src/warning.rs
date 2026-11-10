@@ -11,8 +11,10 @@ use tower_lsp::lsp_types::{
 
 use crate::config::Config;
 use crate::sarif::{self, ArtifactLocation, Level, Log, Region, Run, SarifResult};
+use crate::tracking::Status;
 
 pub const SOURCE: &str = "codesonar";
+const CHANGED_PREFIX: &str = "[changed since the analysis] ";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Warning {
@@ -29,6 +31,10 @@ pub struct Warning {
     pub hub_uri: Option<Url>,
     pub related: Vec<DiagnosticRelatedInformation>,
     pub fixes: Vec<QuickFix>,
+    /// Identifies the warning across analyses.
+    pub fingerprint: String,
+    /// Whether the code of the warning changed since the analysis.
+    pub status: Status,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,15 +44,26 @@ pub struct QuickFix {
 }
 
 impl Warning {
+    /// The diagnostic of the warning. Warnings in changed code are hints.
     pub fn to_diagnostic(&self) -> Diagnostic {
         let href = self.help_uri.clone().or_else(|| self.hub_uri.clone());
+        let changed = self.status == Status::Changed;
+        let message = if changed {
+            format!("{CHANGED_PREFIX}{}", self.message)
+        } else {
+            self.message.clone()
+        };
         Diagnostic {
             range: self.range,
-            severity: Some(self.severity),
+            severity: Some(if changed {
+                DiagnosticSeverity::HINT
+            } else {
+                self.severity
+            }),
             code: self.rule_id.clone().map(NumberOrString::String),
             code_description: href.map(|href| CodeDescription { href }),
             source: Some(SOURCE.to_string()),
-            message: self.message.clone(),
+            message,
             related_information: (!self.related.is_empty()).then(|| self.related.clone()),
             ..Diagnostic::default()
         }
@@ -97,7 +114,23 @@ impl Resolver<'_> {
             Some(text.best().to_string())
         });
 
+        let fingerprint = result.fingerprint().map_or_else(
+            || {
+                let key = format!(
+                    "{}|{}|{}|{}",
+                    result.rule_id().unwrap_or_default(),
+                    uri,
+                    range.start.line,
+                    message
+                );
+                format!("{:016x}", fnv1a(key.as_bytes()))
+            },
+            str::to_string,
+        );
+
         Some(Warning {
+            fingerprint,
+            status: Status::default(),
             uri,
             range,
             severity: to_severity(level),
@@ -260,6 +293,13 @@ fn message_text(message: &sarif::Message) -> Option<String> {
         .clone()
         .or_else(|| message.markdown.clone())
         .filter(|text| !text.is_empty())
+}
+
+/// A hash that stays the same across builds, unlike the one of `std`.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 fn to_severity(level: Level) -> DiagnosticSeverity {
