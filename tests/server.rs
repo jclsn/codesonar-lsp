@@ -380,6 +380,46 @@ fn reports_invalid_source_after_configuration_change() {
 }
 
 #[test]
+fn keeps_the_analysis_when_the_analyze_settings_change() {
+    let dir = workspace();
+    let mut client = Client::initialize(dir.path(), options(dir.path()));
+    client.expect("codesonar/loaded", |_| true);
+
+    let mut settings = options(dir.path());
+    settings["analyze"] = json!({"projectFile": "cs/app"});
+    client.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings": {"codesonar": settings}}),
+    );
+
+    let project = client.command("codesonar.project", Value::Null);
+    assert_eq!(project["prefix"], json!(dir.path().join("cs/app")));
+
+    // The server handles messages concurrently, so a reload may finish later.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    client.pending.extend(client.messages.try_iter());
+
+    assert!(
+        !client
+            .pending
+            .iter()
+            .any(|message| message["method"] == "codesonar/loaded"),
+        "not loaded again"
+    );
+
+    // Other settings still reload it.
+    settings["changed"] = json!("mark");
+    client.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings": {"codesonar": settings}}),
+    );
+
+    client.expect("codesonar/loaded", |_| true);
+
+    client.shutdown();
+}
+
+#[test]
 fn reloads_when_sarif_file_changes() {
     let dir = workspace();
     let capabilities =
