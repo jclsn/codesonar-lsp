@@ -15,10 +15,11 @@ use crate::analysis::{self, Analysis};
 use crate::code_action::{self, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND};
 use crate::config::{Config, expand_home};
 use crate::hover;
-use crate::hub::Hub;
+use crate::hub::{self, Hub};
 use crate::memory::{self, Memory};
 use crate::source::{self, Selection};
 use crate::store::Store;
+use crate::tracking::Anchor;
 use crate::warning::{self, Warning};
 
 const WATCH_PATTERN: &str = "**/*.sarif";
@@ -87,6 +88,11 @@ impl State {
             .collect();
         (diagnostics, self.documents.get(uri).map(|d| d.version))
     }
+}
+
+fn open_memory(config: &Config) -> Option<Memory> {
+    let dir = config.state_dir.clone().or_else(memory::default_dir)?;
+    Some(Memory::open(&expand_home(&dir)))
 }
 
 fn read(uri: &Url) -> Option<String> {
@@ -174,16 +180,106 @@ impl Backend {
 
         self.publish(&uris).await;
         self.loaded().await;
+
+        if let Some(hub) = hub {
+            self.learn_from_hub(&config, &hub).await;
+        }
+    }
+
+    /// Gives warnings whose analyzed code is still unknown the code of the
+    /// analyzed sources that the hub keeps.
+    async fn learn_from_hub(&self, config: &Config, hub: &Hub) {
+        let (key, id, missing) = {
+            let state = self.state.read().await;
+            let Some(analysis) = &state.analysis else {
+                return;
+            };
+            let Some(id) = analysis.hub_id.clone() else {
+                return;
+            };
+            (analysis.key.clone(), id, analysis.missing_anchors())
+        };
+
+        if missing.is_empty() {
+            return;
+        }
+
+        let files = match hub.files(&id).await {
+            Ok(files) => files,
+            Err(error) => {
+                self.warn(format!("cannot list analyzed files: {error:#}"))
+                    .await;
+                return;
+            }
+        };
+        let mut sources = Vec::new();
+
+        for uri in missing {
+            let Ok(path) = uri.to_file_path() else {
+                continue;
+            };
+            let Some(file) = hub::find_file(&files, &path, |name| config.map_path(name)) else {
+                continue;
+            };
+
+            match hub.source(&file.url).await {
+                Ok(lines) => sources.push((uri, lines.join("\n"))),
+                Err(error) => {
+                    self.warn(format!("cannot read {}: {error:#}", file.file))
+                        .await;
+                }
+            }
+        }
+
+        let mut learned = HashMap::new();
+        {
+            let mut state = self.state.write().await;
+
+            match &mut state.analysis {
+                Some(analysis) if analysis.key == key => {
+                    for (uri, text) in &sources {
+                        learned.extend(analysis.learn(uri, text));
+                    }
+                }
+                _ => return,
+            }
+
+            for (uri, _) in &sources {
+                state.relocate(uri);
+            }
+        }
+
+        self.remember(config, &key, learned).await;
+        let uris: Vec<Url> = sources.into_iter().map(|(uri, _)| uri).collect();
+        self.publish(&uris).await;
+    }
+
+    async fn warn(&self, message: String) {
+        self.client
+            .log_message(MessageType::WARNING, format!("CodeSonar: {message}"))
+            .await;
+    }
+
+    async fn remember(&self, config: &Config, key: &str, anchors: HashMap<String, Anchor>) {
+        if anchors.is_empty() {
+            return;
+        }
+
+        let Some(mut memory) = open_memory(config) else {
+            return;
+        };
+
+        if let Err(error) = memory.remember(key, anchors) {
+            self.warn(format!("{error:#}")).await;
+        }
     }
 
     /// Gives warnings the analyzed code from the memory, else from files
     /// that are unchanged since the analysis, and remembers what it learned.
     async fn learn_from_disk(&self, config: &Config, analysis: &mut Analysis) {
-        let Some(dir) = config.state_dir.clone().or_else(memory::default_dir) else {
-            return;
-        };
-        let mut memory = Memory::open(&expand_home(&dir));
-        analysis.set_anchors(&memory.anchors(&analysis.key));
+        if let Some(memory) = open_memory(config) {
+            analysis.set_anchors(&memory.anchors(&analysis.key));
+        }
 
         let mut learned = HashMap::new();
 
@@ -199,13 +295,7 @@ impl Backend {
             }
         }
 
-        if !learned.is_empty()
-            && let Err(error) = memory.remember(&analysis.key, learned)
-        {
-            self.client
-                .log_message(MessageType::WARNING, format!("CodeSonar: {error:#}"))
-                .await;
-        }
+        self.remember(config, &analysis.key, learned).await;
     }
 
     async fn loaded(&self) {

@@ -1,5 +1,7 @@
 //! Client for the CodeSonar hub web API.
 
+use std::path::{Path, PathBuf};
+
 use anyhow::{Context, bail};
 use reqwest::header::ACCEPT;
 use reqwest::{Certificate, Client, RequestBuilder, Response, StatusCode, Url};
@@ -245,6 +247,37 @@ impl Hub {
     fn url(&self, path: &str) -> anyhow::Result<Url> {
         Ok(self.base.join(path.trim_start_matches('/'))?)
     }
+}
+
+/// The analyzed file of a local path: the one whose mapped path is the
+/// local path, else the one sharing the most trailing path components.
+pub fn find_file<'a>(
+    files: &'a [AnalyzedFile],
+    path: &Path,
+    map_path: impl Fn(&str) -> String,
+) -> Option<&'a AnalyzedFile> {
+    let local: Vec<_> = path.components().rev().collect();
+
+    files
+        .iter()
+        .map(|file| {
+            let mapped = PathBuf::from(map_path(&file.file));
+
+            if mapped == path {
+                return (usize::MAX, file);
+            }
+
+            let shared = mapped
+                .components()
+                .rev()
+                .zip(&local)
+                .take_while(|(a, b)| a == *b)
+                .count();
+            (shared, file)
+        })
+        .filter(|(shared, _)| *shared > 0)
+        .max_by_key(|(shared, _)| *shared)
+        .map(|(_, file)| file)
 }
 
 /// The id in hub URLs like `/project/12.json`.
