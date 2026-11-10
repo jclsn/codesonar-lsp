@@ -157,6 +157,19 @@ impl Hub {
         Ok(source_lines(&self.json(url).await?))
     }
 
+    /// The project of an analysis.
+    pub async fn analysis_project(&self, analysis_id: &str) -> anyhow::Result<Project> {
+        let value = self.json(&format!("/analysis/{analysis_id}.json")).await?;
+        let project = value.get("project").context("analysis without project")?;
+        Ok(Project {
+            id: project
+                .get("id")
+                .and_then(Value::as_u64)
+                .context("project without id")?,
+            name: text(project, "name"),
+        })
+    }
+
     /// The rules a warning instance relates to, with their titles.
     pub async fn warning_rules(&self, instance_id: u64) -> anyhow::Result<Vec<Rule>> {
         let value = self

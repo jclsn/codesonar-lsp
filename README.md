@@ -75,7 +75,7 @@ the `analyze` settings keep the shown analysis.
 | Setting                  | Description                                                     |
 | ------------------------ | --------------------------------------------------------------- |
 | `hub.url`                | Hub URL.                                                        |
-| `hub.project`            | Hub project, by name or id. Its newest finished analysis is shown. |
+| `hub.project`            | Hub project, by name or id. Its newest finished analysis is shown. Detected if not set, see below. |
 | `hub.analysisId`         | Show this analysis instead.                                     |
 | `hub.username`           | Hub user. Without one, the hub is accessed anonymously.         |
 | `hub.password`           | Hub password.                                                   |
@@ -88,7 +88,7 @@ the `analyze` settings keep the shown analysis.
 | `changed`                | Warnings in code changed since the analysis: `hide` or `mark` them as hints. |
 | `stateDir`               | Where the analyzed code is remembered. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
 | `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
-| `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Default: `.codesonar/project`. |
+| `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Detected if not set, else `.codesonar/project`. |
 | `analyze.buildCommand`   | Build command, a string or a list. Default: `make -B`.          |
 | `analyze.project`        | Hub project path. Default: `/` and `hub.project`.               |
 | `analyze.presets`        | CodeSonar presets of analyses, e.g. `["misrac2025", "cert"]`. |
@@ -96,6 +96,14 @@ the `analyze` settings keep the shown analysis.
 
 The file watcher covers `**/*.sarif`. Use `codesonar.refresh` for other files
 or for the hub.
+
+## How the project is detected
+
+Without `hub.project` and `analyze.projectFile`, the server looks for the
+project files of an earlier `codesonar analyze` in the workspace root and
+in `.codesonar`, e.g. `mixxx.prj_files`. Their prefix is used for new
+analyses, and the hub project of their last analysis is shown. Without
+project files, the hub project named like the workspace folder is shown.
 
 ## How changed code is detected
 

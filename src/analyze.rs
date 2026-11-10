@@ -8,6 +8,10 @@ use anyhow::{Context, bail};
 use serde::Serialize;
 
 use crate::config::{Config, expand_home};
+use crate::detect::LocalProject;
+
+/// The project prefix of workspaces without project files.
+const DEFAULT_PREFIX: &str = ".codesonar/project";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,31 +23,33 @@ pub struct AnalyzeCommand {
     pub temporary_files: Vec<PathBuf>,
 }
 
-/// Builds the `codesonar analyze` command for the workspace at `root`.
-pub fn command(config: &Config, root: &Path, name: Option<&str>) -> anyhow::Result<AnalyzeCommand> {
+/// Builds the `codesonar analyze` command for the workspace at `root`,
+/// with the project files at `prefix` and the hub project `project`.
+pub fn command(
+    config: &Config,
+    root: &Path,
+    prefix: &Path,
+    project: Option<&str>,
+    name: Option<&str>,
+) -> anyhow::Result<AnalyzeCommand> {
     let Some(hub) = &config.hub else {
         bail!("no hub configured");
     };
     let analyze = &config.analyze;
-    let project_file = root.join(expand_home(&analyze.project_file));
-
-    // CodeSonar creates the project files, but not their directory.
-    if let Some(dir) = project_file.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    }
+    create_dir(prefix)?;
 
     let mut temporary_files = Vec::new();
     let mut command = vec![
         analyze.command.clone(),
         "analyze".into(),
-        path(&project_file),
+        path(prefix),
         "-foreground".into(),
     ];
 
     let project = analyze
         .project
         .clone()
-        .or_else(|| hub.project.as_ref().map(|project| format!("/{project}")));
+        .or_else(|| project.map(|project| format!("/{project}")));
 
     if let Some(project) = project {
         command.extend(["-project".into(), project]);
@@ -91,9 +97,14 @@ pub fn command(config: &Config, root: &Path, name: Option<&str>) -> anyhow::Resu
 }
 
 /// The project prefix: CodeSonar names the project files after it, e.g.
-/// `<prefix>.conf` and `<prefix>.prj_files`.
-pub fn prefix(config: &Config, root: &Path) -> PathBuf {
-    root.join(expand_home(&config.analyze.project_file))
+/// `<prefix>.conf` and `<prefix>.prj_files`. The configured one, else the
+/// one of the project files in the workspace.
+pub fn prefix(config: &Config, root: &Path, local: Option<&LocalProject>) -> PathBuf {
+    match (&config.analyze.project_file, local) {
+        (Some(file), _) => root.join(expand_home(file)),
+        (None, Some(local)) => local.prefix.clone(),
+        (None, None) => root.join(DEFAULT_PREFIX),
+    }
 }
 
 /// The configuration file of the project.
@@ -105,8 +116,8 @@ pub fn conf_file(prefix: &Path) -> PathBuf {
 
 /// Creates the configuration file of the project from CodeSonar's
 /// template, as the first analysis would. Returns whether it was created.
-pub fn create_conf(config: &Config, root: &Path) -> anyhow::Result<bool> {
-    let conf = conf_file(&prefix(config, root));
+pub fn create_conf(config: &Config, prefix: &Path) -> anyhow::Result<bool> {
+    let conf = conf_file(prefix);
 
     if conf.exists() {
         return Ok(false);
@@ -235,6 +246,12 @@ mod tests {
 
     use super::*;
 
+    /// The command with the prefix and project of the settings.
+    fn run(config: &Config, root: &Path, name: Option<&str>) -> anyhow::Result<AnalyzeCommand> {
+        let project = config.hub.as_ref().and_then(|hub| hub.project.as_deref());
+        command(config, root, &prefix(config, root, None), project, name)
+    }
+
     fn config(hub: serde_json::Value) -> Config {
         Config::from_value(&json!({"hub": hub, "analyze": {"buildCommand": "make -j4"}})).unwrap()
     }
@@ -250,7 +267,9 @@ mod tests {
 
         let root = tempfile::tempdir().unwrap();
         let ws = root.path().display().to_string();
-        let command = command(&config, root.path(), Some("nightly")).unwrap();
+
+        let command = run(&config, root.path(), Some("nightly")).unwrap();
+
         assert_eq!(
             command.command,
             [
@@ -283,7 +302,8 @@ mod tests {
     fn writes_temporary_password_file() {
         let config = config(json!({"url": "http://hub", "username": "alice", "password": "pw"}));
         let root = tempfile::tempdir().unwrap();
-        let command = command(&config, root.path(), None).unwrap();
+        let command = run(&config, root.path(), None).unwrap();
+
         assert!(!command.command.contains(&"-name".to_string()));
         assert!(!command.command.contains(&"-project".to_string()));
 
@@ -303,9 +323,10 @@ mod tests {
     #[test]
     fn runs_anonymously_and_needs_a_hub() {
         let root = tempfile::tempdir().unwrap();
-        let command = command(&config(json!({"url": "http://hub"})), root.path(), None).unwrap();
+        let command = run(&config(json!({"url": "http://hub"})), root.path(), None).unwrap();
+
         assert!(!command.command.contains(&"-auth".to_string()));
-        assert!(super::command(&Config::default(), Path::new("/ws"), None).is_err());
+        assert!(run(&Config::default(), Path::new("/ws"), None).is_err());
     }
 
     #[test]
@@ -317,7 +338,9 @@ mod tests {
             "analyze": {"projectFile": "build/cs/project"},
         }))
         .unwrap();
-        command(&config, root.path(), None).unwrap();
+
+        run(&config, root.path(), None).unwrap();
+
         assert!(root.path().join("build/cs").is_dir());
         assert!(!root.path().join("build/cs/project").exists());
     }
@@ -351,7 +374,8 @@ mod tests {
     #[test]
     fn names_the_project_files_after_the_prefix() {
         let config = Config::from_value(&json!({"analyze": {"projectFile": "cs/app"}})).unwrap();
-        let prefix = prefix(&config, Path::new("/ws"));
+        let prefix = prefix(&config, Path::new("/ws"), None);
+
         assert_eq!(prefix, Path::new("/ws/cs/app"));
         assert_eq!(conf_file(&prefix), Path::new("/ws/cs/app.conf"));
     }
@@ -380,20 +404,22 @@ mod tests {
         let root = dir.path().join("ws");
         let config = Config::from_value(&json!({"analyze": {"command": command}})).unwrap();
 
-        assert!(create_conf(&config, &root).unwrap());
+        assert!(create_conf(&config, &root.join(".codesonar/project")).unwrap());
+
         let conf = root.join(".codesonar/project.conf");
         assert_eq!(std::fs::read_to_string(&conf).unwrap(), "# template\n");
 
         std::fs::write(&conf, "edited\n").unwrap();
 
         assert!(
-            !create_conf(&config, &root).unwrap(),
+            !create_conf(&config, &root.join(".codesonar/project")).unwrap(),
             "keeps an existing file"
         );
         assert_eq!(std::fs::read_to_string(&conf).unwrap(), "edited\n");
 
         let config = Config::from_value(&json!({"analyze": {"command": "/nonexistent"}})).unwrap();
-        let error = create_conf(&config, &dir.path().join("other")).unwrap_err();
+        let error = create_conf(&config, &dir.path().join("other/project")).unwrap_err();
+
         assert!(error.to_string().contains("template.conf"), "{error}");
     }
 
@@ -436,7 +462,8 @@ mod tests {
             "analyze": {"presets": ["misrac2025", "cert"], "args": ["-x"]},
         }))
         .unwrap();
-        let command = command(&config, root.path(), None).unwrap().command;
+
+        let command = run(&config, root.path(), None).unwrap().command;
         let at = command.iter().position(|arg| arg == "-preset").unwrap();
 
         assert_eq!(

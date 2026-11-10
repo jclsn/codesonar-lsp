@@ -33,8 +33,9 @@ pub struct Config {
 pub struct AnalyzeConfig {
     /// The CodeSonar command.
     pub command: String,
-    /// CodeSonar project file, relative to the workspace root.
-    pub project_file: PathBuf,
+    /// Project prefix, relative to the workspace root. Detected from the
+    /// project files of the workspace if not set.
+    pub project_file: Option<PathBuf>,
     /// Build command, as a list or a string split at whitespace.
     #[serde(deserialize_with = "words")]
     pub build_command: Vec<String>,
@@ -50,7 +51,7 @@ impl Default for AnalyzeConfig {
     fn default() -> Self {
         Self {
             command: "codesonar".into(),
-            project_file: ".codesonar/project".into(),
+            project_file: None,
             build_command: vec!["make".into(), "-B".into()],
             project: None,
             presets: Vec::new(),

@@ -5,6 +5,7 @@ pub mod analyze;
 pub mod code_action;
 pub mod commands;
 pub mod config;
+pub mod detect;
 pub mod hover;
 pub mod hub;
 pub mod memory;

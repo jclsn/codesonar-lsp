@@ -52,30 +52,36 @@ pub async fn load(
 
     match selection {
         Selection::File(file) => load_file(&file, root).await.map(Some),
-        Selection::Hub(id) => load_hub(hub.context("no hub configured")?, &id, None)
+        Selection::Hub(id) => load_hub(hub.context("no hub configured")?, config, &id, None)
             .await
             .map(Some),
         Selection::Latest | Selection::Configured => {
             let hub = hub.context("no hub configured")?;
-            let project = hub
-                .config()
-                .project
-                .clone()
-                .context("no hub project configured")?;
+            let project = config
+                .hub
+                .as_ref()
+                .and_then(|hub| hub.project.clone())
+                .context("no hub project configured or detected")?;
             let analyses = hub.analyses(&project).await?;
             let Some(latest) = analyses.into_iter().find(|a| a.is_finished()) else {
                 bail!("no finished analysis in hub project {project}");
             };
-            load_hub(hub, &latest.id.to_string(), Some(latest.name))
+            load_hub(hub, config, &latest.id.to_string(), Some(latest.name))
                 .await
                 .map(Some)
         }
     }
 }
 
-async fn load_hub(hub: &Hub, id: &str, name: Option<String>) -> anyhow::Result<Loaded> {
+async fn load_hub(
+    hub: &Hub,
+    config: &Config,
+    id: &str,
+    name: Option<String>,
+) -> anyhow::Result<Loaded> {
     let log = hub.sarif(id).await?;
-    let name = match (name, &hub.config().project) {
+    let project = config.hub.as_ref().and_then(|hub| hub.project.as_ref());
+    let name = match (name, project) {
         (Some(name), _) => Some(name),
         // The name only makes the analysis easier to recognize.
         (None, Some(project)) => hub.analyses(project).await.ok().and_then(|analyses| {

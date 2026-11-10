@@ -19,7 +19,8 @@ use crate::commands::{
     self, AnalyzeArgs, ConnectArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs,
     REFRESH_COMMAND,
 };
-use crate::config::{Config, expand_home};
+use crate::config::{Config, HubConfig, expand_home};
+use crate::detect::{self, LocalProject};
 use crate::hover;
 use crate::hub::{self, Hub};
 use crate::memory::{self, Memory};
@@ -55,17 +56,55 @@ struct State {
     store: Store,
     documents: HashMap<Url, Document>,
     can_watch_files: bool,
+    /// The hub chosen with `codesonar.connect`, instead of the configured.
+    connected: Option<HubConfig>,
+    /// The CodeSonar project files of the workspace.
+    local: Option<LocalProject>,
+    /// The hub project of the workspace, if none is chosen or configured.
+    detected_project: Option<String>,
 }
 
 impl State {
     /// Sets the settings and the hub client they describe.
     fn configure(&mut self, config: Config) -> anyhow::Result<()> {
-        self.hub = match &config.hub {
-            Some(hub) => Some(Arc::new(Hub::new(hub)?)),
+        self.config = config;
+        self.hub = match self.hub_config() {
+            Some(hub) => Some(Arc::new(Hub::new(&hub)?)),
             None => None,
         };
-        self.config = config;
         Ok(())
+    }
+
+    /// The hub settings: the chosen hub, else the configured one, with the
+    /// detected project if there is no other.
+    fn hub_config(&self) -> Option<HubConfig> {
+        let mut hub = self.connected.clone().or_else(|| self.config.hub.clone())?;
+
+        if hub.project.is_none() && hub.analysis_id.is_empty() {
+            hub.project = self.detected_project.clone();
+        }
+
+        Some(hub)
+    }
+
+    /// The settings, with the chosen hub and the detected project.
+    fn effective_config(&self) -> Config {
+        Config {
+            hub: self.hub_config(),
+            ..self.config.clone()
+        }
+    }
+
+    /// Whether the hub project is still unknown, so it may be detected.
+    fn needs_project(&self) -> bool {
+        self.detected_project.is_none()
+            && self
+                .hub_config()
+                .is_some_and(|hub| hub.project.is_none() && hub.analysis_id.is_empty())
+    }
+
+    fn prefix(&self, root: &Path) -> PathBuf {
+        analyze::prefix(&self.config, root, self.local.as_ref())
     }
 
     /// The current text of a file: from its document if open, else from disk.
@@ -88,7 +127,8 @@ impl State {
     }
 
     fn status(&self) -> Value {
-        let hub = self.config.hub.as_ref();
+        let hub = self.hub_config();
+        let hub = hub.as_ref();
         // How analyses are run, also before one is loaded.
         let mut status = json!({
             "loaded": false,
@@ -199,9 +239,14 @@ impl Backend {
     /// Loads an analysis and publishes its warnings as diagnostics.
     async fn load(&self, selection: Selection) -> anyhow::Result<()> {
         let _guard = self.reload_lock.lock().await;
+        self.detect_project().await;
         let (config, root, hub) = {
             let state = self.state.read().await;
-            (state.config.clone(), state.root.clone(), state.hub.clone())
+            (
+                state.effective_config(),
+                state.root.clone(),
+                state.hub.clone(),
+            )
         };
 
         let Some(loaded) =
@@ -249,6 +294,61 @@ impl Backend {
         }
 
         Ok(())
+    }
+
+    /// Detects the CodeSonar project of the workspace: its project files
+    /// give the prefix and, by their last analysis, the hub project. Without
+    /// them, the hub project named like the workspace is used.
+    async fn detect_project(&self) {
+        let (hub, local, root) = {
+            let mut state = self.state.write().await;
+            state.local = state.root.as_deref().and_then(detect::local_project);
+
+            if !state.needs_project() {
+                return;
+            }
+
+            let Some(hub) = state.hub.clone() else {
+                return;
+            };
+            (hub, state.local.clone(), state.root.clone())
+        };
+
+        let mut project = None;
+
+        if let Some(id) = local.and_then(|local| local.analysis_id) {
+            match hub.analysis_project(&id).await {
+                Ok(found) => project = Some(found.name),
+                Err(error) => {
+                    self.warn(format!(
+                        "cannot find the project of analysis {id}: {error:#}"
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        if project.is_none()
+            && let Some(name) = root.as_deref().and_then(Path::file_name)
+            && let Ok(projects) = hub.projects().await
+        {
+            project = projects
+                .into_iter()
+                .find(|project| name.eq_ignore_ascii_case(project.name.as_str()))
+                .map(|project| project.name);
+        }
+
+        let Some(project) = project else {
+            return;
+        };
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("CodeSonar: detected hub project {project}"),
+            )
+            .await;
+        self.state.write().await.detected_project = Some(project);
     }
 
     /// Gives warnings whose analyzed code is still unknown the code of the
@@ -442,8 +542,11 @@ impl Backend {
     async fn connect(&self, args: ConnectArgs) -> anyhow::Result<Value> {
         let hub = {
             let mut state = self.state.write().await;
-            let mut config = state.config.clone();
-            let mut hub = config.hub.take().unwrap_or_default();
+            let mut hub = state
+                .connected
+                .clone()
+                .or_else(|| state.config.hub.clone())
+                .unwrap_or_default();
 
             if let Some(url) = args.url {
                 hub.url = url;
@@ -462,7 +565,9 @@ impl Backend {
                 hub.analysis_id.clear();
             }
 
-            config.hub = Some(hub);
+            // Kept apart from the settings, which clients may send again.
+            state.connected = Some(hub);
+            let config = state.config.clone();
             state.configure(config)?;
             Self::hub(&state)?
         };
@@ -487,11 +592,13 @@ impl Backend {
             let current = state.analysis.as_ref().and_then(|a| a.hub_id.clone());
             (Self::hub(&state)?, current)
         };
-        let project = hub
-            .config()
-            .project
-            .clone()
-            .context("no hub project configured")?;
+        let project = self
+            .state
+            .read()
+            .await
+            .hub_config()
+            .and_then(|hub| hub.project)
+            .context("no hub project configured or detected")?;
         let analyses: Vec<Value> = hub
             .analyses(&project)
             .await?
@@ -522,15 +629,23 @@ impl Backend {
     async fn analyze_command(&self, args: AnalyzeArgs) -> anyhow::Result<Value> {
         let state = self.state.read().await;
         let root = state.root.as_deref().context("no workspace folder")?;
-        let command = analyze::command(&state.config, root, args.name.as_deref())?;
+        let config = state.effective_config();
+        let project = config.hub.as_ref().and_then(|hub| hub.project.as_deref());
+        let command = analyze::command(
+            &config,
+            root,
+            &state.prefix(root),
+            project,
+            args.name.as_deref(),
+        )?;
         Ok(json!(command))
     }
 
     async fn project(&self, args: ProjectArgs) -> anyhow::Result<Value> {
         let state = self.state.read().await;
         let root = state.root.as_deref().context("no workspace folder")?;
-        let created = args.create_conf && analyze::create_conf(&state.config, root)?;
-        let prefix = analyze::prefix(&state.config, root);
+        let prefix = state.prefix(root);
+        let created = args.create_conf && analyze::create_conf(&state.config, &prefix)?;
         let conf = analyze::conf_file(&prefix);
         Ok(json!({
             "prefix": prefix,
@@ -653,6 +768,7 @@ impl LanguageServer for Backend {
 
         let mut state = self.state.write().await;
         state.root = workspace_root(&params);
+        state.local = state.root.as_deref().and_then(detect::local_project);
         state
             .configure(config)
             .map_err(|e| Error::invalid_params(format!("{e:#}")))?;
