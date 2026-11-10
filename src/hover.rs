@@ -58,7 +58,7 @@ impl Explanation {
                 .unwrap_or("Warning")
                 .to_string(),
             rule_id: warning.rule_id.clone(),
-            message: warning.message.clone(),
+            message: paragraphs(&warning.message),
             description: warning.description.clone().filter(|_| rules.is_none()),
             status: warning.status,
             related: warning
@@ -208,6 +208,30 @@ pub fn explanation(warning: &Warning) -> String {
     }
 
     parts.join("\n\n")
+}
+
+/// Splits a CodeSonar message into paragraphs. CodeSonar joins sentences
+/// and list items without a space, e.g. `by free().The issue can occur`.
+fn paragraphs(message: &str) -> String {
+    let message = message.replace(".  - ", ".\n\n- ");
+    let chars: Vec<char> = message.chars().collect();
+    let mut text = String::with_capacity(message.len());
+
+    for (index, &c) in chars.iter().enumerate() {
+        text.push(c);
+
+        let next = chars.get(index + 1);
+        let after = chars.get(index + 2);
+
+        if c == '.'
+            && next.is_some_and(|c| c.is_uppercase())
+            && after.is_some_and(|c| c.is_lowercase())
+        {
+            text.push_str("\n\n");
+        }
+    }
+
+    text
 }
 
 #[cfg(test)]
