@@ -605,6 +605,10 @@ fn mock_hub(runtime: &tokio::runtime::Runtime, time: &str) -> MockServer {
         ),
         ("/analysis/3-file1.json", json!({"children": source})),
         (
+            "/analysis/3.json",
+            json!({"id": 3, "project": {"id": 1, "name": "test"}}),
+        ),
+        (
             "/warninginstance/12.json",
             json!({"categories": [
                 {"link": "LANG.MEM.NPD", "url": "/doc/NPD.html", "relationship": null, "rule_text": null},
@@ -721,6 +725,86 @@ fn explains_rules_with_titles_from_the_hub() {
         json!([{"id": "CWE:476", "title": "NULL Pointer Dereference",
                 "relationship": "intersects", "url": "https://cwe/476/"}])
     );
+
+    client.shutdown();
+}
+
+#[test]
+fn detects_the_project_from_its_project_files() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    std::fs::create_dir(dir.path().join("app.prj_files")).unwrap();
+    std::fs::write(dir.path().join("app.prj_files/aid.txt"), "3\n").unwrap();
+
+    let mut options = hub_options(dir.path(), &hub);
+    options["hub"] = json!({"url": hub.uri()});
+
+    let mut client = Client::initialize(dir.path(), options);
+
+    let loaded = client.expect("codesonar/loaded", |_| true);
+    assert_eq!(loaded["project"], "test");
+    assert_eq!(loaded["hubId"], "3");
+
+    let command = client.command("codesonar.analyzeCommand", Value::Null);
+    let line: Vec<&str> = command["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|part| part.as_str().unwrap())
+        .collect();
+    assert_eq!(line[2], dir.path().join("app").to_str().unwrap());
+    assert!(line.windows(2).any(|w| w == ["-project", "/test"]));
+
+    client.shutdown();
+}
+
+#[test]
+fn detects_the_project_by_the_workspace_name() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Test");
+    std::fs::create_dir(&root).unwrap();
+
+    let mut options = hub_options(&root, &hub);
+    options["hub"] = json!({"url": hub.uri()});
+
+    let mut client = Client::initialize(&root, options);
+
+    let loaded = client.expect("codesonar/loaded", |_| true);
+    assert_eq!(loaded["project"], "test");
+    assert_eq!(loaded["hubId"], "3");
+
+    client.shutdown();
+}
+
+#[test]
+fn keeps_the_chosen_project_when_the_settings_are_sent_again() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut options = hub_options(dir.path(), &hub);
+    options["hub"] = json!({"url": hub.uri(), "project": "other"});
+
+    let mut client = Client::initialize(dir.path(), options.clone());
+    client.expect("window/showMessage", |p| p["type"] == 1);
+
+    client.command("codesonar.connect", json!({"project": "test"}));
+    client.expect("codesonar/loaded", |p| p["project"] == "test");
+
+    options["analyze"] = json!({"presets": ["cert"]});
+    client.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings": {"codesonar": options}}),
+    );
+
+    // The server handles messages concurrently.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let status = client.command("codesonar.status", Value::Null);
+    assert_eq!(status["project"], "test");
+    assert_eq!(status["presets"], json!(["cert"]));
 
     client.shutdown();
 }

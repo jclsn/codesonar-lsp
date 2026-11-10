@@ -635,6 +635,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn finds_the_project_of_an_analysis() {
+        let server = MockServer::start().await;
+
+        mount_json(
+            &server,
+            "/analysis/8.json",
+            json!({"id": 8, "project": {"id": 1, "name": "mixxx", "path": "/mixxx"}}),
+        )
+        .await;
+
+        mount_json(&server, "/analysis/9.json", json!({"id": 9})).await;
+
+        let hub = Hub::new(&config(&server, "")).unwrap();
+        assert_eq!(
+            hub.analysis_project("8").await.unwrap(),
+            Project {
+                id: 1,
+                name: "mixxx".into()
+            }
+        );
+        assert!(hub.analysis_project("9").await.is_err());
+    }
+
     #[test]
     fn finds_warning_instance_ids() {
         let id = |url: &str| warning_instance_id(&Url::parse(url).unwrap());

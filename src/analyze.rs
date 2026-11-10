@@ -372,6 +372,31 @@ mod tests {
     }
 
     #[test]
+    fn prefers_the_configured_prefix_to_the_detected() {
+        let local = LocalProject {
+            prefix: "/ws/mixxx".into(),
+            analysis_id: None,
+        };
+
+        let configured =
+            Config::from_value(&json!({"analyze": {"projectFile": "cs/app"}})).unwrap();
+        let root = Path::new("/ws");
+
+        assert_eq!(
+            prefix(&configured, root, Some(&local)),
+            Path::new("/ws/cs/app")
+        );
+        assert_eq!(
+            prefix(&Config::default(), root, Some(&local)),
+            Path::new("/ws/mixxx")
+        );
+        assert_eq!(
+            prefix(&Config::default(), root, None),
+            Path::new("/ws/.codesonar/project")
+        );
+    }
+
+    #[test]
     fn names_the_project_files_after_the_prefix() {
         let config = Config::from_value(&json!({"analyze": {"projectFile": "cs/app"}})).unwrap();
         let prefix = prefix(&config, Path::new("/ws"), None);
