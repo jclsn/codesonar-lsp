@@ -25,11 +25,18 @@ pub fn command(config: &Config, root: &Path, name: Option<&str>) -> anyhow::Resu
         bail!("no hub configured");
     };
     let analyze = &config.analyze;
+    let project_file = root.join(expand_home(&analyze.project_file));
+
+    // CodeSonar creates the project files, but not their directory.
+    if let Some(dir) = project_file.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    }
+
     let mut temporary_files = Vec::new();
     let mut command = vec![
         analyze.command.clone(),
         "analyze".into(),
-        path(&root.join(expand_home(&analyze.project_file))),
+        path(&project_file),
         "-foreground".into(),
     ];
 
@@ -112,20 +119,23 @@ mod tests {
             "username": "alice",
             "passwordFile": "/secret/pw",
         }));
-        let command = command(&config, Path::new("/ws"), Some("nightly")).unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        let ws = root.path().display().to_string();
+        let command = command(&config, root.path(), Some("nightly")).unwrap();
         assert_eq!(
             command.command,
             [
                 "codesonar",
                 "analyze",
-                "/ws/.codesonar/project",
+                &format!("{ws}/.codesonar/project"),
                 "-foreground",
                 "-project",
                 "/app",
                 "-name",
                 "nightly",
                 "-srcroot",
-                "/ws",
+                &ws,
                 "-auth",
                 "password",
                 "-hubuser",
@@ -137,14 +147,15 @@ mod tests {
                 "-j4",
             ]
         );
-        assert_eq!(command.cwd, Path::new("/ws"));
+        assert_eq!(command.cwd, root.path());
         assert!(command.temporary_files.is_empty());
     }
 
     #[test]
     fn writes_temporary_password_file() {
         let config = config(json!({"url": "http://hub", "username": "alice", "password": "pw"}));
-        let command = command(&config, Path::new("/ws"), None).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let command = command(&config, root.path(), None).unwrap();
         assert!(!command.command.contains(&"-name".to_string()));
         assert!(!command.command.contains(&"-project".to_string()));
 
@@ -163,12 +174,8 @@ mod tests {
 
     #[test]
     fn runs_anonymously_and_needs_a_hub() {
-        let command = command(
-            &config(json!({"url": "http://hub"})),
-            Path::new("/ws"),
-            None,
-        )
-        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let command = command(&config(json!({"url": "http://hub"})), root.path(), None).unwrap();
         assert!(!command.command.contains(&"-auth".to_string()));
         assert!(super::command(&Config::default(), Path::new("/ws"), None).is_err());
     }
