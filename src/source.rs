@@ -14,7 +14,7 @@ use crate::warning::{self, Warning};
 /// Returns `None` if no source is configured.
 pub async fn load(config: &Config, root: Option<&Path>) -> anyhow::Result<Option<Vec<Warning>>> {
     let log = if let Some(hub) = &config.hub {
-        Hub::new(hub)?.fetch_sarif().await?
+        Hub::new(hub)?.sarif(&hub.analysis_id).await?
     } else if let Some(file) = config.sarif_file(root) {
         let text = tokio::fs::read_to_string(&file)
             .await

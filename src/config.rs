@@ -26,7 +26,11 @@ pub struct Config {
 #[serde(default, rename_all = "camelCase")]
 pub struct HubConfig {
     pub url: String,
+    /// Analysis to show. Without one, the newest finished analysis of
+    /// `project` is shown.
     pub analysis_id: String,
+    /// Hub project, by name or id.
+    pub project: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
     /// File whose first line is the password.
@@ -39,11 +43,11 @@ pub struct HubConfig {
 }
 
 impl HubConfig {
-    pub fn sarif_path(&self) -> String {
+    pub fn sarif_path(&self, analysis_id: &str) -> String {
         self.sarif_path
             .as_deref()
             .unwrap_or(DEFAULT_SARIF_PATH)
-            .replace("{analysisId}", &self.analysis_id)
+            .replace("{analysisId}", analysis_id)
     }
 
     /// The configured password, else the first line of the password file,
@@ -151,7 +155,10 @@ mod tests {
 
         let hub = config.hub.unwrap();
         assert_eq!(hub.url, "https://hub:7340");
-        assert_eq!(hub.sarif_path(), "/analysis/42-allwarnings.sarif");
+        assert_eq!(
+            hub.sarif_path(&hub.analysis_id),
+            "/analysis/42-allwarnings.sarif"
+        );
         assert_eq!(config.path_mappings.len(), 1);
     }
 
@@ -170,7 +177,10 @@ mod tests {
             sarif_path: Some("/analysis/{analysisId}-allwarnings.sarif?filter=2".into()),
             ..HubConfig::default()
         };
-        assert_eq!(hub.sarif_path(), "/analysis/7-allwarnings.sarif?filter=2");
+        assert_eq!(
+            hub.sarif_path(&hub.analysis_id),
+            "/analysis/7-allwarnings.sarif?filter=2"
+        );
     }
 
     #[test]

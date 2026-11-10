@@ -2,8 +2,10 @@
 
 use anyhow::{Context, bail};
 use reqwest::header::ACCEPT;
-use reqwest::{Certificate, Client, RequestBuilder, Response, Url};
-use serde::Deserialize;
+use reqwest::{Certificate, Client, RequestBuilder, Response, StatusCode, Url};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::Mutex;
 
 use crate::config::HubConfig;
 use crate::sarif::Log;
@@ -12,6 +14,8 @@ pub struct Hub {
     client: Client,
     base: Url,
     config: HubConfig,
+    /// Bearer token of the current session.
+    token: Mutex<Option<String>>,
 }
 
 /// Session returned by `/session/create-basic-auth/`.
@@ -24,6 +28,35 @@ struct Session {
 #[derive(Deserialize)]
 struct HubError {
     error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Project {
+    pub id: u64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Analysis {
+    pub id: u64,
+    pub name: String,
+    pub started: String,
+    /// E.g. `ANALYZING`, `DAEMON` or `FINISHED`.
+    pub state: String,
+}
+
+impl Analysis {
+    /// Whether the analysis has results to show.
+    pub fn is_finished(&self) -> bool {
+        matches!(self.state.as_str(), "FINISHED" | "DAEMON")
+    }
+}
+
+/// A file of an analysis with the URL of its analyzed source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalyzedFile {
+    pub file: String,
+    pub url: String,
 }
 
 impl Hub {
@@ -47,34 +80,149 @@ impl Hub {
             client: builder.build()?,
             base,
             config: config.clone(),
+            token: Mutex::default(),
         })
     }
 
-    /// Signs in if credentials are configured and downloads the SARIF export.
-    pub async fn fetch_sarif(&self) -> anyhow::Result<Log> {
-        let token = match &self.config.username {
-            Some(username) => {
-                let password = self.config.password().unwrap_or_default();
-                Some(self.sign_in(username, &password).await?)
-            }
+    pub fn config(&self) -> &HubConfig {
+        &self.config
+    }
 
-            None => None,
+    /// Downloads the SARIF export of an analysis.
+    pub async fn sarif(&self, analysis_id: &str) -> anyhow::Result<Log> {
+        let path = self.config.sarif_path(analysis_id);
+        let text = self.get(&path).await?;
+        Log::from_json(&text).with_context(|| format!("invalid SARIF from {path}"))
+    }
+
+    pub async fn projects(&self) -> anyhow::Result<Vec<Project>> {
+        let rows = self.rows("/project_search.json").await?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| {
+                Some(Project {
+                    id: id_from_url(row.get("url")?.as_str()?)?,
+                    name: text(row, "project"),
+                })
+            })
+            .collect())
+    }
+
+    /// The analyses of a project, given by name or id, newest first.
+    pub async fn analyses(&self, project: &str) -> anyhow::Result<Vec<Analysis>> {
+        let projects = self.projects().await?;
+        let Some(found) = projects
+            .iter()
+            .find(|p| p.name == project || p.id.to_string() == project)
+        else {
+            bail!("hub project {project} not found");
         };
 
-        let url = self.url(&self.config.sarif_path())?;
-        let mut request = self.client.get(url.clone());
+        let rows = self.rows(&format!("/project/{}.json", found.id)).await?;
+        let mut analyses: Vec<Analysis> = rows
+            .iter()
+            .filter_map(|row| {
+                Some(Analysis {
+                    id: id_from_url(row.get("url")?.as_str()?)?,
+                    name: text(row, "analysis"),
+                    started: text(row, "started"),
+                    state: text(row, "state"),
+                })
+            })
+            .collect();
+        analyses.sort_by_key(|analysis| std::cmp::Reverse(analysis.id));
+        Ok(analyses)
+    }
 
-        if let Some(token) = &token {
-            request = request.bearer_auth(token);
+    /// The files of an analysis.
+    pub async fn files(&self, analysis_id: &str) -> anyhow::Result<Vec<AnalyzedFile>> {
+        let rows = self
+            .rows(&format!("/analysis/{analysis_id}-files.json"))
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| AnalyzedFile {
+                file: text(row, "file"),
+                url: text(row, "url"),
+            })
+            .filter(|file| !file.file.is_empty() && !file.url.is_empty())
+            .collect())
+    }
+
+    /// The analyzed source of a file listing, by its URL.
+    pub async fn source(&self, url: &str) -> anyhow::Result<Vec<String>> {
+        Ok(source_lines(&self.json(url).await?))
+    }
+
+    /// The page of an analysis.
+    pub fn analysis_url(&self, analysis_id: &str) -> anyhow::Result<Url> {
+        self.url(&format!("/analysis/{analysis_id}.html"))
+    }
+
+    /// Signs in once with the configured credentials, then requests `path`.
+    /// An expired session is renewed once.
+    pub async fn get(&self, path: &str) -> anyhow::Result<String> {
+        let url = self.url(path)?;
+        let mut renewed = false;
+
+        loop {
+            let token = self.token(renewed).await?;
+            let mut request = self.client.get(url.clone());
+
+            if let Some(token) = &token {
+                request = request.bearer_auth(token);
+            }
+
+            let response = request
+                .send()
+                .await
+                .with_context(|| format!("cannot download {url}"))?;
+            let status = response.status();
+
+            if token.is_some()
+                && !renewed
+                && matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+            {
+                renewed = true;
+                continue;
+            }
+
+            return Ok(check(response)
+                .await
+                .with_context(|| format!("cannot download {url}"))?
+                .text()
+                .await?);
+        }
+    }
+
+    async fn json(&self, path: &str) -> anyhow::Result<Value> {
+        let text = self.get(path).await?;
+        serde_json::from_str(&text).with_context(|| format!("invalid JSON from {path}"))
+    }
+
+    async fn rows(&self, path: &str) -> anyhow::Result<Vec<Value>> {
+        let value = self.json(path).await?;
+        Ok(value
+            .get("rows")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// The bearer token, signing in if there is none yet or `renew` is set.
+    async fn token(&self, renew: bool) -> anyhow::Result<Option<String>> {
+        let Some(username) = &self.config.username else {
+            return Ok(None);
+        };
+
+        let mut token = self.token.lock().await;
+
+        if renew || token.is_none() {
+            let password = self.config.password().unwrap_or_default();
+            *token = Some(self.sign_in(username, &password).await?);
         }
 
-        let text = send(request)
-            .await
-            .with_context(|| format!("cannot download {url}"))?
-            .text()
-            .await?;
-
-        Log::from_json(&text).with_context(|| format!("invalid SARIF from {url}"))
+        Ok(token.clone())
     }
 
     /// Creates a session with HTTP basic auth, like the hub's sign-in page,
@@ -99,9 +247,76 @@ impl Hub {
     }
 }
 
-/// Sends a request and turns error responses into errors with the hub's message.
+/// The id in hub URLs like `/project/12.json`.
+fn id_from_url(url: &str) -> Option<u64> {
+    let name = url.rsplit('/').next()?;
+    name.strip_suffix(".json")?.parse().ok()
+}
+
+fn text(row: &Value, key: &str) -> String {
+    match row.get(key) {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Null) | None => String::new(),
+        Some(value) => value.to_string(),
+    }
+}
+
+/// The lines of a hub file listing, a tree of `wdom_line` nodes whose
+/// nested children hold the text.
+pub fn source_lines(listing: &Value) -> Vec<String> {
+    fn flatten(node: &Value, out: &mut String) {
+        match node {
+            Value::String(text) => out.push_str(text),
+            Value::Object(_) => {
+                for child in node
+                    .get("children")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    flatten(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut lines = Vec::new();
+
+    for node in listing
+        .get("children")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if node.get("type").and_then(Value::as_str) != Some("wdom_line") {
+            continue;
+        }
+
+        let number = node
+            .get("number")
+            .and_then(Value::as_u64)
+            .map_or(lines.len() + 1, |n| n as usize);
+
+        while lines.len() + 1 < number {
+            lines.push(String::new());
+        }
+
+        let mut line = String::new();
+        flatten(node, &mut line);
+        lines.push(line.trim_end_matches(['\r', '\n']).to_string());
+    }
+
+    lines
+}
+
+/// Sends a request and turns error responses into errors.
 async fn send(request: RequestBuilder) -> anyhow::Result<Response> {
-    let response = request.send().await?;
+    check(request.send().await?).await
+}
+
+/// Turns error responses into errors with the hub's message.
+async fn check(response: Response) -> anyhow::Result<Response> {
     let status = response.status();
 
     if status.is_success() {
@@ -151,7 +366,7 @@ mod tests {
 
         let log = Hub::new(&config(&server, ""))
             .unwrap()
-            .fetch_sarif()
+            .sarif("7")
             .await
             .unwrap();
         assert_eq!(log.runs[0].results.len(), 4);
@@ -188,7 +403,13 @@ mod tests {
             password: Some("secret".into()),
             ..config(&server, "/cs")
         };
-        let log = Hub::new(&config).unwrap().fetch_sarif().await.unwrap();
+
+        let log = Hub::new(&config)
+            .unwrap()
+            .sarif(&config.analysis_id)
+            .await
+            .unwrap();
+
         assert_eq!(log.runs.len(), 1);
     }
 
@@ -209,8 +430,15 @@ mod tests {
             password: Some("wrong".into()),
             ..config(&server, "")
         };
-        let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
+
+        let error = Hub::new(&config)
+            .unwrap()
+            .sarif(&config.analysis_id)
+            .await
+            .unwrap_err();
+
         let error = format!("{error:#}");
+
         assert!(error.contains("hub sign in failed"), "{error}");
         assert!(error.contains("Invalid user name or password"), "{error}");
     }
@@ -229,7 +457,13 @@ mod tests {
             username: Some("alice".into()),
             ..config(&server, "")
         };
-        let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
+
+        let error = Hub::new(&config)
+            .unwrap()
+            .sarif(&config.analysis_id)
+            .await
+            .unwrap_err();
+
         assert!(format!("{error:#}").contains("no session"), "{error:#}");
     }
 
@@ -251,7 +485,7 @@ mod tests {
 
         let error = Hub::new(&config(&server, ""))
             .unwrap()
-            .fetch_sarif()
+            .sarif("7")
             .await
             .unwrap_err();
 
@@ -264,7 +498,13 @@ mod tests {
             analysis_id: "8".into(),
             ..config(&server, "")
         };
-        let error = Hub::new(&config).unwrap().fetch_sarif().await.unwrap_err();
+
+        let error = Hub::new(&config)
+            .unwrap()
+            .sarif(&config.analysis_id)
+            .await
+            .unwrap_err();
+
         assert!(format!("{error:#}").contains("invalid SARIF"), "{error:#}");
     }
 
