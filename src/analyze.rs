@@ -179,4 +179,18 @@ mod tests {
         assert!(!command.command.contains(&"-auth".to_string()));
         assert!(super::command(&Config::default(), Path::new("/ws"), None).is_err());
     }
+
+    #[test]
+    fn creates_the_project_directory() {
+        let root = tempfile::tempdir().unwrap();
+
+        let config = Config::from_value(&json!({
+            "hub": {"url": "http://hub"},
+            "analyze": {"projectFile": "build/cs/project"},
+        }))
+        .unwrap();
+        command(&config, root.path(), None).unwrap();
+        assert!(root.path().join("build/cs").is_dir());
+        assert!(!root.path().join("build/cs/project").exists());
+    }
 }
