@@ -4,6 +4,7 @@ pub mod code_action;
 pub mod config;
 pub mod hover;
 pub mod hub;
+pub mod memory;
 pub mod sarif;
 pub mod server;
 pub mod source;
