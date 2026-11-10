@@ -116,7 +116,7 @@ argument, an object.
 | `codesonar.projects`        |                                                  | `[{id, name}]` |
 | `codesonar.analyses`        |                                                  | `{project, analyses: [{id, name, started, state, finished, current}]}` |
 | `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
-| `codesonar.status`          |                                                  | `{loaded, name, key, hubId, url, total, shown, counts}` |
+| `codesonar.status`          |                                                  | `{loaded, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
 | `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created}`: the project files; `createConf` creates the configuration file from CodeSonar's template |

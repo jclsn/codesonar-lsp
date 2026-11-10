@@ -55,7 +55,8 @@ pub const ALL: [&str; 12] = [
 
 /// Sent after an analysis was loaded and once more after the analyzed
 /// code was read from the hub, with the status:
-/// `{loaded, name, key, hubId, url, total, counts}`.
+/// `{loaded, hub, project, presets, name, key, hubId, url, total, shown,
+/// counts}`. Without a loaded analysis, only the first four are set.
 pub enum Loaded {}
 
 impl Notification for Loaded {

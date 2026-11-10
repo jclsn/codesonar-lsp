@@ -88,24 +88,38 @@ impl State {
     }
 
     fn status(&self) -> Value {
+        let hub = self.config.hub.as_ref();
+        // How analyses are run, also before one is loaded.
+        let mut status = json!({
+            "loaded": false,
+            "hub": hub.map(|hub| &hub.url),
+            "project": hub.and_then(|hub| hub.project.as_ref()),
+            "presets": self.config.analyze.presets,
+        });
         let Some(analysis) = &self.analysis else {
-            return json!({"loaded": false});
+            return status;
         };
         let url = analysis
             .hub_id
             .as_ref()
             .zip(self.hub.as_ref())
             .and_then(|(id, hub)| hub.analysis_url(id).ok());
-        json!({
-            "loaded": true,
-            "name": analysis.name,
-            "key": analysis.key,
-            "hubId": analysis.hub_id,
-            "url": url,
-            "total": analysis.len(),
-            "shown": self.store.len(),
-            "counts": analysis.counts(),
-        })
+        let fields = [
+            ("loaded", json!(true)),
+            ("name", json!(analysis.name)),
+            ("key", json!(analysis.key)),
+            ("hubId", json!(analysis.hub_id)),
+            ("url", json!(url)),
+            ("total", json!(analysis.len())),
+            ("shown", json!(self.store.len())),
+            ("counts", json!(analysis.counts())),
+        ];
+
+        for (key, value) in fields {
+            status[key] = value;
+        }
+
+        status
     }
 
     /// The shown warnings, by file and position.
