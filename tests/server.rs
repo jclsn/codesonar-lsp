@@ -781,6 +781,30 @@ fn creates_the_project_configuration() {
 }
 
 #[test]
+fn lists_presets() {
+    let dir = workspace();
+    let install = dir.path().join("install");
+    std::fs::create_dir_all(install.join("bin")).unwrap();
+    std::fs::create_dir_all(install.join("presets")).unwrap();
+    std::fs::write(install.join("bin/codesonar"), "").unwrap();
+    std::fs::write(install.join("template.conf"), "").unwrap();
+    std::fs::write(install.join("presets/cert.conf"), "# CERT rules\n").unwrap();
+
+    let mut options = options(dir.path());
+    options["analyze"] = json!({"command": install.join("bin/codesonar"), "presets": ["cert"]});
+
+    let mut client = Client::initialize(dir.path(), options);
+
+    let presets = client.command("codesonar.presets", Value::Null);
+    assert_eq!(
+        presets,
+        json!([{"name": "cert", "description": "CERT rules", "selected": true}])
+    );
+
+    client.shutdown();
+}
+
+#[test]
 fn returns_analyze_command() {
     let dir = workspace();
     let mut options = options(dir.path());

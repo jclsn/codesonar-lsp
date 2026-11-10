@@ -328,6 +328,19 @@ mod tests {
         std::fs::create_dir_all(install.join("bin")).unwrap();
         std::fs::write(install.join("bin/codesonar"), "").unwrap();
         std::fs::write(install.join("template.conf"), "# template\n").unwrap();
+        std::fs::create_dir_all(install.join("presets")).unwrap();
+        let presets = [
+            (
+                "misrac2025",
+                "# This file was generated from 'x.in'\n#\n\n# Enables MISRA C:2025\n# rules.\n\n# Other\nA = 1\n",
+            ),
+            ("dry_run", "DRY_RUN = Yes\n"),
+            ("misra_inc", "# Included by others\n"),
+        ];
+        for (name, text) in presets {
+            std::fs::write(install.join(format!("presets/{name}.conf")), text).unwrap();
+        }
+        std::fs::write(install.join("presets/README"), "").unwrap();
         std::fs::create_dir_all(dir.join("bin")).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(install.join("bin/codesonar"), dir.join("bin/codesonar"))
@@ -382,5 +395,53 @@ mod tests {
         let config = Config::from_value(&json!({"analyze": {"command": "/nonexistent"}})).unwrap();
         let error = create_conf(&config, &dir.path().join("other")).unwrap_err();
         assert!(error.to_string().contains("template.conf"), "{error}");
+    }
+
+    #[test]
+    fn lists_the_presets_of_the_installation() {
+        let dir = tempfile::tempdir().unwrap();
+        let command = install(dir.path());
+
+        let config = Config::from_value(&json!({
+            "analyze": {"command": command, "presets": ["misrac2025"]},
+        }))
+        .unwrap();
+
+        assert_eq!(
+            presets(&config).unwrap(),
+            [
+                Preset {
+                    name: "dry_run".into(),
+                    description: None,
+                    selected: false,
+                },
+                Preset {
+                    name: "misrac2025".into(),
+                    description: Some("Enables MISRA C:2025 rules.".into()),
+                    selected: true,
+                },
+            ]
+        );
+
+        let config = Config::from_value(&json!({"analyze": {"command": "/nonexistent"}})).unwrap();
+        assert!(presets(&config).is_err());
+    }
+
+    #[test]
+    fn passes_the_presets() {
+        let root = tempfile::tempdir().unwrap();
+
+        let config = Config::from_value(&json!({
+            "hub": {"url": "http://hub"},
+            "analyze": {"presets": ["misrac2025", "cert"], "args": ["-x"]},
+        }))
+        .unwrap();
+        let command = command(&config, root.path(), None).unwrap().command;
+        let at = command.iter().position(|arg| arg == "-preset").unwrap();
+
+        assert_eq!(
+            command[at..at + 5],
+            ["-preset", "misrac2025", "-preset", "cert", "-x"]
+        );
     }
 }
