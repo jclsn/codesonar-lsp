@@ -40,6 +40,8 @@ pub struct AnalyzeConfig {
     pub build_command: Vec<String>,
     /// Hub project path. Defaults to `/` and the hub project.
     pub project: Option<String>,
+    /// CodeSonar presets of analyses, e.g. `misrac2025`.
+    pub presets: Vec<String>,
     /// Further arguments of `codesonar analyze`.
     pub args: Vec<String>,
 }
@@ -51,6 +53,7 @@ impl Default for AnalyzeConfig {
             project_file: ".codesonar/project".into(),
             build_command: vec!["make".into(), "-B".into()],
             project: None,
+            presets: Vec::new(),
             args: Vec::new(),
         }
     }

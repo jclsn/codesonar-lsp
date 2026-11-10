@@ -34,7 +34,11 @@ pub const ANALYZE_COMMAND: &str = "codesonar.analyzeCommand";
 /// is created from CodeSonar's template if it does not exist.
 pub const PROJECT: &str = "codesonar.project";
 
-pub const ALL: [&str; 11] = [
+/// Returns the presets of the CodeSonar installation: `[{name,
+/// description, selected}]`. The setting `analyze.presets` selects them.
+pub const PRESETS: &str = "codesonar.presets";
+
+pub const ALL: [&str; 12] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
@@ -46,6 +50,7 @@ pub const ALL: [&str; 11] = [
     WARNINGS,
     ANALYZE_COMMAND,
     PROJECT,
+    PRESETS,
 ];
 
 /// Sent after an analysis was loaded and once more after the analyzed

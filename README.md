@@ -91,6 +91,7 @@ the `analyze` settings keep the shown analysis.
 | `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Default: `.codesonar/project`. |
 | `analyze.buildCommand`   | Build command, a string or a list. Default: `make -B`.          |
 | `analyze.project`        | Hub project path. Default: `/` and `hub.project`.               |
+| `analyze.presets`        | CodeSonar presets of analyses, e.g. `["misrac2025", "cert"]`. |
 | `analyze.args`           | Further arguments of `codesonar analyze`.                       |
 
 The file watcher covers `**/*.sarif`. Use `codesonar.refresh` for other files
@@ -119,6 +120,7 @@ argument, an object.
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
 | `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created}`: the project files; `createConf` creates the configuration file from CodeSonar's template |
+| `codesonar.presets`         |                                                  | `[{name, description, selected}]`: the presets of the CodeSonar installation |
 | `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |
 | `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |

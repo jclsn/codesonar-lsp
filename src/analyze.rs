@@ -75,6 +75,10 @@ pub fn command(config: &Config, root: &Path, name: Option<&str>) -> anyhow::Resu
         ]);
     }
 
+    for preset in &analyze.presets {
+        command.extend(["-preset".into(), preset.clone()]);
+    }
+
     command.extend(analyze.args.iter().cloned());
     command.push(hub.url.clone());
     command.extend(analyze.build_command.iter().cloned());
@@ -129,9 +133,9 @@ fn create_dir(file: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The `template.conf` of a CodeSonar installation, which is next to the
-/// `bin` directory of the command.
-fn template(command: &str) -> Option<PathBuf> {
+/// The directory of a CodeSonar installation, with `template.conf` and
+/// the `presets`: the parent of the `bin` directory of the command.
+fn installation(command: &str) -> Option<PathBuf> {
     let command = expand_home(Path::new(command));
     let command = if command.components().count() > 1 {
         command
@@ -146,8 +150,68 @@ fn template(command: &str) -> Option<PathBuf> {
     [Some(command), resolved]
         .into_iter()
         .flatten()
-        .filter_map(|path| Some(path.parent()?.parent()?.join("template.conf")))
-        .find(|template| template.is_file())
+        .filter_map(|path| Some(path.parent()?.parent()?.to_path_buf()))
+        .find(|dir| dir.join("template.conf").is_file())
+}
+
+fn template(command: &str) -> Option<PathBuf> {
+    Some(installation(command)?.join("template.conf"))
+}
+
+/// A preset of CodeSonar, which configures an analysis for a purpose, e.g.
+/// the rules of a coding standard.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct Preset {
+    pub name: String,
+    pub description: Option<String>,
+    /// Whether analyses use it.
+    pub selected: bool,
+}
+
+/// The presets of the CodeSonar installation, by name.
+pub fn presets(config: &Config) -> anyhow::Result<Vec<Preset>> {
+    let command = &config.analyze.command;
+    let dir = installation(command)
+        .with_context(|| format!("cannot find the CodeSonar installation of {command}"))?
+        .join("presets");
+    let entries =
+        std::fs::read_dir(&dir).with_context(|| format!("cannot read {}", dir.display()))?;
+    let mut presets: Vec<Preset> = entries
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let name = path.file_name()?.to_str()?.strip_suffix(".conf")?;
+
+            // Parts that other presets include.
+            if name.ends_with("_inc") {
+                return None;
+            }
+
+            Some(Preset {
+                description: std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| description(&text)),
+                selected: config.analyze.presets.iter().any(|p| p == name),
+                name: name.to_string(),
+            })
+        })
+        .collect();
+    presets.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(presets)
+}
+
+/// The first comment of a preset, after the note that it was generated.
+fn description(text: &str) -> Option<String> {
+    let words: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| {
+            line.is_empty() || *line == "#" || line.starts_with("# This file was generated")
+        })
+        .map_while(|line| line.strip_prefix('#'))
+        .map(str::trim)
+        .take_while(|line| !line.is_empty())
+        .collect();
+    (!words.is_empty()).then(|| words.join(" "))
 }
 
 /// Writes the password to a file only the user can read.

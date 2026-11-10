@@ -817,6 +817,10 @@ impl LanguageServer for Backend {
             commands::WARNINGS => Ok(self.state.read().await.warnings()),
             commands::ANALYZE_COMMAND => self.analyze_command(parse(arguments)?).await,
             commands::PROJECT => self.project(parse(arguments)?).await,
+            commands::PRESETS => {
+                let state = self.state.read().await;
+                analyze::presets(&state.config).map(|presets| json!(presets))
+            }
             command => {
                 return Err(Error::invalid_params(format!("unknown command {command}")));
             }
