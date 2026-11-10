@@ -211,3 +211,125 @@ fn indent(line: &str) -> i64 {
 fn add(value: u32, delta: i64) -> u32 {
     (i64::from(value) + delta).clamp(0, i64::from(u32::MAX)) as u32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ANALYZED: &str = "int main(void)\n{\n    char *p = 0;\n\n    *p = 1;\n    return 0;\n}\n";
+
+    fn range(line: u32, start: u32, end: u32) -> Range {
+        Range::new(Position::new(line, start), Position::new(line, end))
+    }
+
+    fn place(text: &str, analyzed: Range) -> Placement {
+        let anchor = Lines::new(ANALYZED).anchor(analyzed.start.line);
+        Lines::new(text).place(analyzed, anchor.as_ref(), analyzed.start.line)
+    }
+
+    #[test]
+    fn records_line_and_neighbors() {
+        let lines = Lines::new(ANALYZED);
+        let anchor = lines.anchor(4).unwrap();
+
+        assert_eq!(anchor.line, "    *p = 1;");
+        assert_eq!(anchor.before, "char *p = 0;", "blank lines are skipped");
+        assert_eq!(anchor.after, "return 0;");
+        assert_eq!(lines.anchor(0).unwrap().before, "");
+        assert!(lines.anchor(3).is_none(), "blank line");
+        assert!(lines.anchor(99).is_none());
+    }
+
+    #[test]
+    fn keeps_unchanged_warnings() {
+        let placement = place(ANALYZED, range(4, 4, 6));
+        assert_eq!(placement.status, Status::Unchanged);
+        assert_eq!(placement.range, range(4, 4, 6));
+    }
+
+    #[test]
+    fn follows_moved_lines() {
+        let text = ANALYZED.replace("{\n", "{\n    int a;\n    int b;\n");
+        let placement = place(&text, range(4, 4, 6));
+
+        assert_eq!(placement.status, Status::Moved);
+        assert_eq!(placement.range, range(6, 4, 6));
+        assert_eq!(placement.delta, 2);
+    }
+
+    #[test]
+    fn follows_indentation() {
+        let text = ANALYZED.replace("    *p = 1;", "        *p = 1;");
+        let placement = place(&text, range(4, 4, 6));
+
+        assert_eq!(placement.status, Status::Moved);
+        assert_eq!(placement.range, range(4, 8, 10));
+    }
+
+    #[test]
+    fn detects_changed_lines() {
+        let text = ANALYZED.replace("*p = 1;", "if (p) *p = 1;");
+        assert_eq!(place(&text, range(4, 4, 6)).status, Status::Changed);
+
+        let text = ANALYZED.replace("    *p = 1;\n", "");
+        assert_eq!(place(&text, range(4, 4, 6)).status, Status::Changed);
+    }
+
+    #[test]
+    fn ignores_copies_without_context() {
+        let text = format!(
+            "{}void f(void)\n{{\n    *p = 1;\n}}\n",
+            ANALYZED.replace("    *p = 1;\n", "")
+        );
+        assert_eq!(place(&text, range(4, 4, 6)).status, Status::Changed);
+    }
+
+    #[test]
+    fn prefers_matching_context_then_nearest_line() {
+        let text = "x;\n    *p = 1;\ny;\nchar *p = 0;\n    *p = 1;\nreturn 0;\n";
+        let anchor = Lines::new(ANALYZED).anchor(4);
+        let placement = Lines::new(text).place(range(4, 4, 6), anchor.as_ref(), 1);
+
+        assert_eq!(
+            placement.range.start.line, 4,
+            "best context wins over distance"
+        );
+
+        let text = "    *p = 1;\nchar *p = 0;\n    *p = 1;\nreturn 0;\nchar *p = 0;\n    *p = 1;\nreturn 0;\n";
+        let placement = Lines::new(text).place(range(4, 4, 6), anchor.as_ref(), 4);
+
+        assert_eq!(placement.range.start.line, 5, "nearest of equal matches");
+    }
+
+    #[test]
+    fn leaves_unknown_code_unverified() {
+        let placement = Lines::new(ANALYZED).place(range(4, 4, 6), None, 4);
+        assert_eq!(placement.status, Status::Unverified);
+        assert_eq!(placement.range, range(4, 4, 6));
+    }
+
+    #[test]
+    fn moves_fix_edits() {
+        let edit = TextEdit {
+            range: range(4, 4, 11),
+            new_text: "if (p) *p = 1;".into(),
+        };
+
+        let text = ANALYZED.replace("{\n", "{\n    int a;\n");
+        let edits = place(&text, range(4, 4, 6))
+            .edits(std::slice::from_ref(&edit))
+            .unwrap();
+
+        assert_eq!(edits[0].range, range(5, 4, 11));
+
+        let text = ANALYZED.replace("    *p = 1;", "  *p = 1;");
+        assert!(
+            place(&text, range(4, 4, 6))
+                .edits(std::slice::from_ref(&edit))
+                .is_none()
+        );
+
+        let text = ANALYZED.replace("*p = 1;", "*p = 2;");
+        assert!(place(&text, range(4, 4, 6)).edits(&[edit]).is_none());
+    }
+}
