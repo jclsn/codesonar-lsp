@@ -29,6 +29,8 @@ pub struct HubConfig {
     pub analysis_id: String,
     pub username: Option<String>,
     pub password: Option<String>,
+    /// File whose first line is the password.
+    pub password_file: Option<PathBuf>,
     /// Hub path of the SARIF export; `{analysisId}` is replaced.
     pub sarif_path: Option<String>,
     /// PEM file with an additional trusted CA certificate.
@@ -44,11 +46,19 @@ impl HubConfig {
             .replace("{analysisId}", &self.analysis_id)
     }
 
-    /// The configured password, falling back to `CODESONAR_PASSWORD`.
+    /// The configured password, else the first line of the password file,
+    /// else `CODESONAR_PASSWORD`.
     pub fn password(&self) -> Option<String> {
-        self.password
-            .clone()
-            .or_else(|| std::env::var(PASSWORD_ENV).ok())
+        if let Some(password) = &self.password {
+            return Some(password.clone());
+        }
+
+        if let Some(file) = &self.password_file {
+            let text = std::fs::read_to_string(expand_home(file)).ok()?;
+            return Some(text.lines().next().unwrap_or_default().to_string());
+        }
+
+        std::env::var(PASSWORD_ENV).ok()
     }
 }
 
@@ -70,6 +80,14 @@ impl PathMapping {
         }
 
         Some(format!("{}{}", self.to.trim_end_matches(['/', '\\']), rest))
+    }
+}
+
+/// Replaces a leading `~` with the home directory.
+pub fn expand_home(path: &Path) -> PathBuf {
+    match (path.strip_prefix("~"), std::env::var_os("HOME")) {
+        (Ok(rest), Some(home)) => PathBuf::from(home).join(rest),
+        _ => path.to_path_buf(),
     }
 }
 
