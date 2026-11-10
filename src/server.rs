@@ -701,21 +701,32 @@ impl LanguageServer for Backend {
             }
         };
 
-        {
+        let reload = {
             let mut state = self.state.write().await;
 
             if state.config == config {
                 return;
             }
 
+            // How analyses are run does not change the shown one.
+            let shown = Config {
+                analyze: config.analyze.clone(),
+                ..state.config.clone()
+            };
+            let reload = shown != config;
+
             if let Err(error) = state.configure(config) {
                 drop(state);
                 self.error(format!("invalid settings: {error:#}")).await;
                 return;
             }
-        }
 
-        self.reload().await;
+            reload
+        };
+
+        if reload {
+            self.reload().await;
+        }
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {

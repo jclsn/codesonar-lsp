@@ -52,7 +52,8 @@ See `:help codesonar` for its commands.
 ## Settings
 
 The settings are passed as `initializationOptions`. They can be changed later
-via `workspace/didChangeConfiguration` under the `codesonar` key.
+via `workspace/didChangeConfiguration` under the `codesonar` key. Changes of
+the `analyze` settings keep the shown analysis.
 
 ```json
 {
@@ -87,7 +88,7 @@ via `workspace/didChangeConfiguration` under the `codesonar` key.
 | `changed`                | Warnings in code changed since the analysis: `hide` or `mark` them as hints. |
 | `stateDir`               | Where the analyzed code is remembered. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
 | `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
-| `analyze.projectFile`    | CodeSonar project file, relative to the workspace root. Default: `.codesonar/project`. |
+| `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Default: `.codesonar/project`. |
 | `analyze.buildCommand`   | Build command, a string or a list. Default: `make -B`.          |
 | `analyze.project`        | Hub project path. Default: `/` and `hub.project`.               |
 | `analyze.args`           | Further arguments of `codesonar analyze`.                       |
