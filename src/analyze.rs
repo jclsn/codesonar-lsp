@@ -93,3 +93,83 @@ fn password_file(password: &str) -> anyhow::Result<PathBuf> {
 fn path(path: &Path) -> String {
     path.display().to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn config(hub: serde_json::Value) -> Config {
+        Config::from_value(&json!({"hub": hub, "analyze": {"buildCommand": "make -j4"}})).unwrap()
+    }
+
+    #[test]
+    fn builds_analyze_command() {
+        let config = config(json!({
+            "url": "http://hub:7340",
+            "project": "app",
+            "username": "alice",
+            "passwordFile": "/secret/pw",
+        }));
+        let command = command(&config, Path::new("/ws"), Some("nightly")).unwrap();
+        assert_eq!(
+            command.command,
+            [
+                "codesonar",
+                "analyze",
+                "/ws/.codesonar/project",
+                "-foreground",
+                "-project",
+                "/app",
+                "-name",
+                "nightly",
+                "-srcroot",
+                "/ws",
+                "-auth",
+                "password",
+                "-hubuser",
+                "alice",
+                "-hubpwfile",
+                "/secret/pw",
+                "http://hub:7340",
+                "make",
+                "-j4",
+            ]
+        );
+        assert_eq!(command.cwd, Path::new("/ws"));
+        assert!(command.temporary_files.is_empty());
+    }
+
+    #[test]
+    fn writes_temporary_password_file() {
+        let config = config(json!({"url": "http://hub", "username": "alice", "password": "pw"}));
+        let command = command(&config, Path::new("/ws"), None).unwrap();
+        assert!(!command.command.contains(&"-name".to_string()));
+        assert!(!command.command.contains(&"-project".to_string()));
+
+        let file = &command.temporary_files[0];
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "pw\n");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn runs_anonymously_and_needs_a_hub() {
+        let command = command(
+            &config(json!({"url": "http://hub"})),
+            Path::new("/ws"),
+            None,
+        )
+        .unwrap();
+        assert!(!command.command.contains(&"-auth".to_string()));
+        assert!(super::command(&Config::default(), Path::new("/ws"), None).is_err());
+    }
+}

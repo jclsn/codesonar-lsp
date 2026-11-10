@@ -89,6 +89,13 @@ impl Client {
     }
 
     fn request(&mut self, method: &str, params: Value) -> Value {
+        let response = self.respond(method, params);
+        assert!(response.get("error").is_none(), "{response}");
+        response["result"].clone()
+    }
+
+    /// Sends a request and returns the whole response.
+    fn respond(&mut self, method: &str, params: Value) -> Value {
         let id = self.next_id;
         self.next_id += 1;
         let mut request = json!({"jsonrpc": "2.0", "id": id, "method": method});
@@ -98,10 +105,19 @@ impl Client {
         }
 
         self.send(request);
-        let response =
-            self.wait_for(|message| message["id"] == id && message.get("method").is_none());
-        assert!(response.get("error").is_none(), "{response}");
-        response["result"].clone()
+        self.wait_for(|message| message["id"] == id && message.get("method").is_none())
+    }
+
+    fn command(&mut self, command: &str, argument: Value) -> Value {
+        let arguments = if argument.is_null() {
+            json!([])
+        } else {
+            json!([argument])
+        };
+        self.request(
+            "workspace/executeCommand",
+            json!({"command": command, "arguments": arguments}),
+        )
     }
 
     /// Waits for a notification or request from the server and returns its params.
@@ -546,6 +562,111 @@ fn learns_analyzed_code_from_the_hub() {
         params["diagnostics"],
         json!([]),
         "changed since the analysis"
+    );
+
+    client.shutdown();
+}
+
+#[test]
+fn chooses_analyses_with_commands() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut client = Client::initialize(dir.path(), hub_options(dir.path(), &hub));
+    let loaded = client.expect("codesonar/loaded", |_| true);
+    assert_eq!(loaded["hubId"], "3", "newest finished analysis");
+    assert_eq!(loaded["name"], "done");
+    assert_eq!(loaded["url"], format!("{}/analysis/3.html", hub.uri()));
+
+    let analyses = client.command("codesonar.analyses", Value::Null);
+    assert_eq!(analyses["project"], "test");
+    let analyses = analyses["analyses"].as_array().unwrap();
+    assert_eq!(analyses.len(), 2);
+    assert_eq!(analyses[0]["id"], 4);
+    assert_eq!(analyses[0]["finished"], false);
+    assert_eq!(analyses[1]["current"], true);
+
+    let status = client.command("codesonar.load", json!({"analysis": 3}));
+    assert_eq!(status["loaded"], true);
+    assert_eq!(status["total"], 3);
+    assert_eq!(status["counts"]["changed"], 0);
+
+    let warnings = client.command("codesonar.warnings", Value::Null);
+    let main = &warnings.as_array().unwrap()[0];
+    assert_eq!(main["uri"], uri(dir.path().join("src/main.c")));
+    assert_eq!(main["status"], "unchanged");
+    assert_eq!(main["code"], "LANG.MEM.NPD");
+
+    let status = client.command(
+        "codesonar.load",
+        json!({"file": dir.path().join("codesonar.sarif")}),
+    );
+
+    assert_eq!(status["hubId"], Value::Null);
+    assert_eq!(client.command("codesonar.status", Value::Null), status);
+
+    let projects = client.command("codesonar.projects", Value::Null);
+    assert_eq!(projects, json!([{"id": 1, "name": "test"}]));
+
+    client.shutdown();
+}
+
+#[test]
+fn connects_to_a_hub() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut client = Client::initialize(dir.path(), tracking_options(dir.path()));
+    client.expect("codesonar/loaded", |_| true);
+
+    let projects = client.command(
+        "codesonar.connect",
+        json!({"url": hub.uri(), "project": "test"}),
+    );
+
+    assert_eq!(projects[0]["name"], "test");
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    let response = client.respond(
+        "workspace/executeCommand",
+        json!({"command": "codesonar.connect", "arguments": [{"url": "not a url"}]}),
+    );
+
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(message.contains("invalid hub url"), "{message}");
+
+    client.shutdown();
+}
+
+#[test]
+fn returns_analyze_command() {
+    let dir = workspace();
+    let mut options = options(dir.path());
+    options["hub"] = json!({"url": "http://hub:7340", "project": "test"});
+
+    let mut client = Client::initialize(dir.path(), options);
+
+    let command = client.command("codesonar.analyzeCommand", json!({"name": "from vim"}));
+    let line: Vec<&str> = command["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|part| part.as_str().unwrap())
+        .collect();
+    assert_eq!(line[..2], ["codesonar", "analyze"]);
+    assert!(line.windows(2).any(|w| w == ["-name", "from vim"]));
+    assert_eq!(command["cwd"], json!(dir.path()));
+
+    let response = client.respond(
+        "workspace/executeCommand",
+        json!({"command": "codesonar.load", "arguments": [{"analysis": [1]}]}),
+    );
+
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid analysis")
     );
 
     client.shutdown();

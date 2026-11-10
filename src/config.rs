@@ -310,6 +310,23 @@ mod tests {
     }
 
     #[test]
+    fn parses_analyze_settings() {
+        let config = Config::from_value(&json!({"changed": "mark"})).unwrap();
+        assert_eq!(config.changed, Changed::Mark);
+        assert_eq!(config.analyze, AnalyzeConfig::default());
+
+        let value = json!({"analyze": {"buildCommand": ["cmake", "--build", "out dir"]}});
+        let config = Config::from_value(&value).unwrap();
+
+        assert_eq!(
+            config.analyze.build_command,
+            ["cmake", "--build", "out dir"]
+        );
+        assert_eq!(config.analyze.command, "codesonar", "defaults kept");
+        assert!(Config::from_value(&json!({"changed": "sometimes"})).is_err());
+    }
+
+    #[test]
     fn normalizes_windows_paths() {
         assert_eq!(normalize("/C:/a"), "C:/a");
         assert_eq!(normalize("D:\\a\\b"), "D:/a/b");
