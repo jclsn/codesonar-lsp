@@ -341,6 +341,8 @@ mod tests {
     use wiremock::matchers::{body_string_contains, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use serde_json::json;
+
     use super::*;
 
     const FIXTURE: &str = include_str!("../tests/fixtures/codesonar.sarif");
@@ -506,6 +508,148 @@ mod tests {
             .unwrap_err();
 
         assert!(format!("{error:#}").contains("invalid SARIF"), "{error:#}");
+    }
+
+    async fn mount_json(server: &MockServer, route: &str, body: Value) {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn lists_analyses_of_a_project() {
+        let server = MockServer::start().await;
+
+        mount_json(
+            &server,
+            "/project_search.json",
+            json!({"rows": [
+                {"project": "other", "url": "/project/1.json"},
+                {"project": "test_project", "url": "/project/2.json"},
+            ]}),
+        )
+        .await;
+
+        mount_json(
+            &server,
+            "/project/2.json",
+            json!({"rows": [
+                {"analysis": "first", "started": "Mon", "state": "FINISHED", "url": "/analysis/3.json"},
+                {"analysis": "second", "started": "Tue", "state": "ANALYZING", "url": "/analysis/5.json"},
+            ]}),
+        )
+        .await;
+
+        let hub = Hub::new(&config(&server, "")).unwrap();
+        let projects = hub.projects().await.unwrap();
+
+        assert_eq!(
+            projects[1],
+            Project {
+                id: 2,
+                name: "test_project".into()
+            }
+        );
+
+        let analyses = hub.analyses("test_project").await.unwrap();
+        assert_eq!(analyses.len(), 2);
+        assert_eq!(analyses[0].id, 5, "newest first");
+        assert!(!analyses[0].is_finished());
+        assert_eq!(analyses[1].name, "first");
+        assert!(analyses[1].is_finished());
+        assert_eq!(hub.analyses("2").await.unwrap().len(), 2, "by id");
+
+        let error = hub.analyses("missing").await.unwrap_err();
+        assert!(error.to_string().contains("not found"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn reads_analyzed_sources() {
+        let server = MockServer::start().await;
+
+        mount_json(
+            &server,
+            "/analysis/3-files.json",
+            json!({"rows": [{"file": "/src/main.c", "url": "/analysis/3-file1.json"}]}),
+        )
+        .await;
+
+        mount_json(
+            &server,
+            "/analysis/3-file1.json",
+            json!({"children": [
+                {"type": "wdom_file"},
+                {"type": "wdom_line", "number": 1, "children": ["int ", {"children": ["main"]}, "(void)\n"]},
+                {"type": "wdom_line", "number": 3, "children": ["}\r\n"]},
+            ]}),
+        )
+        .await;
+
+        let hub = Hub::new(&config(&server, "")).unwrap();
+        let files = hub.files("3").await.unwrap();
+
+        assert_eq!(files[0].file, "/src/main.c");
+
+        let lines = hub.source(&files[0].url).await.unwrap();
+        assert_eq!(lines, ["int main(void)", "", "}"]);
+        assert_eq!(
+            hub.analysis_url("3").unwrap().as_str(),
+            format!("{}/analysis/3.html", server.uri())
+        );
+    }
+
+    #[tokio::test]
+    async fn keeps_and_renews_the_session() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/session/create-basic-auth/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"bearer": "old"}"#))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/session/create-basic-auth/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"bearer": "new"}"#))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(header("authorization", "Bearer old"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"rows": []}"#))
+            .up_to_n_times(2)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(header("authorization", "Bearer old"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(header("authorization", "Bearer new"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"rows": []}"#))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = HubConfig {
+            username: Some("alice".into()),
+            password: Some("secret".into()),
+            ..config(&server, "")
+        };
+
+        let hub = Hub::new(&config).unwrap();
+
+        for _ in 0..3 {
+            assert!(hub.projects().await.unwrap().is_empty());
+        }
     }
 
     #[test]
