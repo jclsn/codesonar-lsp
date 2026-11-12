@@ -1092,7 +1092,19 @@ fn connects_to_a_hub() {
     );
 
     assert_eq!(projects[0]["name"], "test");
+
     client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    // The workspace keeps the choice.
+    let conf = std::fs::read_to_string(dir.path().join("codesonar.conf")).unwrap();
+    assert!(
+        conf.contains("# codesonar-lsp: project = /test\n"),
+        "{conf}"
+    );
+    assert!(conf.contains(&format!(
+        "# END codesonar-lsp\n\nHUB_ADDRESS = {}\n",
+        hub_address(&hub)
+    )));
 
     let response = client.respond(
         "workspace/executeCommand",
@@ -1158,6 +1170,141 @@ fn reports_the_hub_and_presets_in_the_status() {
         client.command("codesonar.status", Value::Null),
         json!({"loaded": false, "hidden": false, "conf": null, "hub": null, "project": null, "presets": []})
     );
+
+    client.shutdown();
+}
+
+/// A workspace whose `codesonar.conf` names the hub of the mock, its project
+/// `test`, the preset `security` and the build command `ninja`, with a
+/// CodeSonar installation. The editor settings know nothing about the hub.
+fn configured_workspace(hub: &MockServer) -> (tempfile::TempDir, std::path::PathBuf, Value) {
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let install = dir.path().join("install");
+    std::fs::create_dir_all(install.join("bin")).unwrap();
+    std::fs::create_dir_all(install.join("presets")).unwrap();
+    std::fs::write(install.join("bin/codesonar"), "").unwrap();
+    std::fs::write(
+        install.join("template.conf"),
+        include_str!("fixtures/template_checks.conf"),
+    )
+    .unwrap();
+    std::fs::write(install.join("presets/security.conf"), "# Security\n").unwrap();
+
+    let conf = dir.path().join("codesonar.conf");
+    std::fs::write(
+        &conf,
+        format!(
+            "# BEGIN codesonar-lsp\n# codesonar-lsp: project = /test\n\
+             # codesonar-lsp: presets = security\n# codesonar-lsp: build = ninja\n\
+             # END codesonar-lsp\nHUB_ADDRESS = {}\n",
+            hub_address(hub)
+        ),
+    )
+    .unwrap();
+
+    let mut options = hub_options(dir.path(), hub);
+    options.as_object_mut().unwrap().remove("hub");
+    options["analyze"] = json!({"command": install.join("bin/codesonar")});
+
+    (dir, conf, options)
+}
+
+fn hub_address(hub: &MockServer) -> String {
+    hub.uri().trim_start_matches("http://").to_string()
+}
+
+#[test]
+fn starts_the_workspace_configuration() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let conf = dir.path().join("codesonar.conf");
+    std::fs::write(&conf, "INCREMENTAL_BUILD = Yes\n").unwrap();
+
+    let mut client = Client::initialize(dir.path(), hub_options(dir.path(), &hub));
+    client.expect("codesonar/loaded", |_| true);
+
+    let project = client.command("codesonar.project", Value::Null);
+    assert_eq!(project["workspaceConf"], json!(conf));
+    assert_eq!(project["workspaceConfExists"], true);
+    assert_eq!(project["section"], false);
+
+    let folder = dir.path().file_name().unwrap().to_str().unwrap();
+    assert_eq!(
+        project["suggested"],
+        json!({"project": folder, "build": "make -B", "incremental": true,
+            "incrementalBuild": "make", "hubAddress": null})
+    );
+
+    let project = client.command(
+        "codesonar.initConf",
+        json!({"project": "test", "build": "make -B -j4", "incrementalBuild": "make -j4",
+            "hubAddress": hub_address(&hub)}),
+    );
+
+    assert_eq!(project["section"], true);
+
+    let text = std::fs::read_to_string(&conf).unwrap();
+    assert!(
+        text.contains("# codesonar-lsp: project = /test\n"),
+        "{text}"
+    );
+    assert!(text.contains("# codesonar-lsp: build = make -B -j4 "));
+    assert!(text.contains("# full rebuild, for the first analysis\n"));
+    assert!(text.contains("# codesonar-lsp: incremental-build = make -j4 "));
+    assert!(text.contains(&format!(
+        "# END codesonar-lsp\n\nHUB_ADDRESS = {}\n",
+        hub_address(&hub)
+    )));
+    assert!(text.ends_with("\nINCREMENTAL_BUILD = Yes\n"), "in place");
+
+    // Without incremental analyses, every analysis is a full one.
+    client.command(
+        "codesonar.initConf",
+        json!({"project": "test", "build": "make -B", "incremental": false,
+            "incrementalBuild": "make"}),
+    );
+
+    let text = std::fs::read_to_string(&conf).unwrap();
+    assert!(!text.contains("incremental-build"), "{text}");
+    assert!(text.ends_with("\nINCREMENTAL_BUILD = No\n"));
+
+    client.shutdown();
+}
+
+#[test]
+fn reads_the_workspace_configuration() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let (dir, conf, options) = configured_workspace(&hub);
+    let mut client = Client::initialize(dir.path(), options);
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    let status = client.command("codesonar.status", Value::Null);
+    assert_eq!(status["hub"], hub.uri());
+    assert_eq!(status["project"], "test");
+    assert_eq!(status["presets"], json!(["security"]));
+    assert_eq!(status["conf"], json!(conf));
+
+    let command = client.command("codesonar.analyzeCommand", Value::Null)["command"].clone();
+    let command: Vec<&str> = command
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    assert!(
+        command.windows(2).any(|w| w == ["-project", "/test"]),
+        "{command:?}"
+    );
+    assert!(command.windows(2).any(|w| w == ["-preset", "security"]));
+    assert!(
+        command
+            .windows(2)
+            .any(|w| w[0] == "-conf-file" && w[1] == conf.to_str().unwrap())
+    );
+    assert_eq!(command.last(), Some(&"ninja"));
+
     client.shutdown();
 }
 

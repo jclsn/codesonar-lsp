@@ -265,6 +265,8 @@ impl Config {
 mod tests {
     use serde_json::json;
 
+    use crate::workspace::WorkspaceConf;
+
     use super::*;
 
     #[test]
@@ -409,5 +411,39 @@ mod tests {
         assert_eq!(normalize("/C:/a"), "C:/a");
         assert_eq!(normalize("D:\\a\\b"), "D:/a/b");
         assert_eq!(normalize("/usr/a"), "/usr/a");
+    }
+
+    #[test]
+    fn takes_the_settings_of_the_workspace() {
+        let config = Config::from_value(&json!({
+            "hub": {"url": "https://old:1/", "username": "alice", "project": "other", "analysisId": "7"},
+            "analyze": {"presets": ["cert"], "buildCommand": "make -B"},
+        }))
+        .unwrap();
+
+        let workspace = WorkspaceConf::parse(
+            "# BEGIN codesonar-lsp\n# codesonar-lsp: project = /tree/app\n\
+             # codesonar-lsp: presets = security\n# codesonar-lsp: build = ninja\n\
+             # END codesonar-lsp\nHUB_ADDRESS = hub:7340\n",
+        );
+
+        let config = config.with_workspace(&workspace);
+        let hub = config.hub.unwrap();
+
+        assert_eq!(hub.url, "https://hub:7340", "the scheme is kept");
+        assert_eq!(hub.username.as_deref(), Some("alice"));
+        assert_eq!(hub.project.as_deref(), Some("app"));
+        assert_eq!(hub.analysis_id, "");
+        assert_eq!(config.analyze.project.as_deref(), Some("/tree/app"));
+        assert_eq!(config.analyze.presets, ["security"]);
+        assert_eq!(config.analyze.build_command, ["ninja"]);
+
+        let config =
+            Config::default().with_workspace(&WorkspaceConf::parse("HUB_ADDRESS = hub:1\n"));
+        assert_eq!(config.hub.unwrap().url, "http://hub:1", "a hub of its own");
+        assert_eq!(
+            Config::default().with_workspace(&WorkspaceConf::default()),
+            Config::default()
+        );
     }
 }

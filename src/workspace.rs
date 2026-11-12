@@ -273,3 +273,185 @@ fn key_value(line: &str, key: &str) -> Option<String> {
 pub fn setting(text: &str, key: &str) -> Option<String> {
     text.lines().rev().find_map(|line| key_value(line, key))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CONF: &str = "\
+# Mixxx
+IGNORED_COMPILATIONS += /build/
+# BEGIN codesonar-lsp: written by codesonar-lsp
+# codesonar-lsp: project = /tree/mixxx
+# codesonar-lsp: presets = security concurrency
+# codesonar-lsp: build = cmake --build build
+WARNING_FILTER += allow class=\"Function Too Long\"
+WARNING_FILTER += discard class=\"Unused Value\"
+SOMETHING = by hand
+# END codesonar-lsp
+HUB_ADDRESS = hub:7340
+#HUB_ADDRESS = commented:1
+INCREMENTAL_BUILD = No
+";
+
+    #[test]
+    fn reads_the_section_and_the_settings() {
+        let conf = WorkspaceConf::parse(CONF);
+        assert_eq!(conf.project.as_deref(), Some("/tree/mixxx"));
+
+        assert_eq!(conf.project_name(), Some("mixxx"));
+        assert_eq!(
+            conf.presets,
+            Some(vec!["security".into(), "concurrency".into()])
+        );
+        assert_eq!(
+            conf.build,
+            Some(vec!["cmake".into(), "--build".into(), "build".into()])
+        );
+        assert_eq!(conf.incremental_build, None);
+
+        assert!(conf.has_section);
+        assert_eq!(
+            conf.hub_address.as_deref(),
+            Some("hub:7340"),
+            "comments do not count"
+        );
+        assert_eq!(conf.incremental, Some(false));
+        assert_eq!(
+            conf.checks,
+            [
+                CheckRule {
+                    class: "Function Too Long".into(),
+                    enabled: true
+                },
+                CheckRule {
+                    class: "Unused Value".into(),
+                    enabled: false
+                },
+            ]
+        );
+
+        assert_eq!(conf.other, ["SOMETHING = by hand"]);
+    }
+
+    #[test]
+    fn the_last_hub_address_wins() {
+        let conf = WorkspaceConf::parse(&format!("{CONF}HUB_ADDRESS = other:1\n"));
+        assert_eq!(conf.hub_address.as_deref(), Some("other:1"));
+        assert!(!WorkspaceConf::parse("HUB_ADDRESS = hub:1\n").has_section);
+    }
+
+    #[test]
+    fn writes_settings_outside_the_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("codesonar.conf");
+        std::fs::write(&file, CONF).unwrap();
+        WorkspaceConf::read(&file)
+            .write_setting("HUB_ADDRESS", "new:2")
+            .unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+
+        assert!(
+            text.contains("# END codesonar-lsp\nHUB_ADDRESS = new:2\n#HUB_ADDRESS"),
+            "{text}"
+        );
+
+        // Without one, after a blank line below the section.
+        std::fs::write(&file, format!("{HEADER}\n{END}\nINCREMENTAL_BUILD = Yes\n")).unwrap();
+        WorkspaceConf::read(&file)
+            .write_setting("HUB_ADDRESS", "hub:1")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            format!("{HEADER}\n{END}\n\nHUB_ADDRESS = hub:1\nINCREMENTAL_BUILD = Yes\n")
+        );
+    }
+
+    #[test]
+    fn rewrites_only_the_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("codesonar.conf");
+        std::fs::write(&file, CONF).unwrap();
+        let mut conf = WorkspaceConf::read(&file);
+        conf.presets = Some(vec!["cert".into()]);
+        conf.write().unwrap();
+
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.starts_with("# Mixxx\nIGNORED_COMPILATIONS += /build/\n# BEGIN"),
+            "{text}"
+        );
+        assert!(text.ends_with(
+            "# END codesonar-lsp\nHUB_ADDRESS = hub:7340\n#HUB_ADDRESS = commented:1\nINCREMENTAL_BUILD = No\n"
+        ));
+        assert!(text.contains("# codesonar-lsp: presets = cert\n"));
+        assert!(text.contains("SOMETHING = by hand\n"), "kept");
+        assert_eq!(WorkspaceConf::read(&file), conf, "read back");
+    }
+
+    #[test]
+    fn explains_the_build_commands() {
+        let conf = WorkspaceConf {
+            build: Some(vec!["make".into(), "-B".into()]),
+            incremental_build: Some(vec!["make".into()]),
+            ..WorkspaceConf::default()
+        };
+
+        let lines = conf.lines();
+
+        assert_eq!(
+            lines[1],
+            "# codesonar-lsp: build = make -B                 # full rebuild, for the first analysis"
+        );
+        assert_eq!(
+            lines[2],
+            "# codesonar-lsp: incremental-build = make        # what changed, for later analyses"
+        );
+
+        assert_eq!(
+            WorkspaceConf::parse(&(lines.join("\n") + "\n")).build,
+            conf.build,
+            "read back"
+        );
+        assert_eq!(
+            WorkspaceConf::parse(&lines.join("\n")).incremental_build,
+            conf.incremental_build
+        );
+    }
+
+    #[test]
+    fn creates_the_section_at_the_top() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("codesonar.conf");
+        std::fs::write(&file, "INCREMENTAL_BUILD = Yes\n").unwrap();
+
+        let conf = WorkspaceConf {
+            project: Some("/app".into()),
+            ..WorkspaceConf::read(&file)
+        };
+
+        conf.write().unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            format!(
+                "{HEADER}\n# codesonar-lsp: project = /app\n{END}\n\nINCREMENTAL_BUILD = Yes\n"
+            )
+        );
+
+        let missing = dir.path().join("new.conf");
+
+        WorkspaceConf {
+            presets: Some(vec![]),
+            ..WorkspaceConf::read(&missing)
+        }
+        .write()
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&missing).unwrap(),
+            format!("{HEADER}\n# codesonar-lsp: presets = \n{END}\n")
+        );
+    }
+}
