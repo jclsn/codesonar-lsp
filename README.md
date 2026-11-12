@@ -93,9 +93,43 @@ the `analyze` settings keep the shown analysis.
 The file watcher covers `**/*.sarif`. Use `codesonar.refresh` for other files
 or for the hub.
 
+## The workspace configuration
+
+What an analysis is about belongs to the workspace, not to the editor:
+the server reads it from `codesonar.conf` in the workspace root
+(`analyze.confFile`), which `codesonar analyze` gets with `-conf-file`.
+CodeSonar's own settings stay as they are, e.g. `HUB_ADDRESS` names the
+hub. CodeSonar has no settings for the hub project, the presets and the
+build command, so the server keeps them in comments of a section that it
+writes, e.g. for `codesonar.connect`:
+
+```
+# BEGIN codesonar-lsp: written by codesonar-lsp, e.g. :CodeSonarPresets
+# codesonar-lsp: project = /mixxx
+# codesonar-lsp: presets = security concurrency
+# codesonar-lsp: build = cmake --build build --clean-first # full rebuild, for the first analysis
+# codesonar-lsp: incremental-build = cmake --build build    # what changed, for later analyses
+WARNING_FILTER += allow class="Function Too Long"
+# END codesonar-lsp
+HUB_ADDRESS = 192.168.184.28:7340
+```
+
+`HUB_ADDRESS` is CodeSonar's own setting, so the server keeps it outside
+the section. `codesonar.initConf` starts the configuration with the
+project, the build commands, `INCREMENTAL_BUILD` and `HUB_ADDRESS`. Only the first analysis
+needs the full rebuild, since CodeSonar only sees what is compiled; later
+ones are incremental and take the rest from their parent.
+
+The section wins over the editor settings: `HUB_ADDRESS` over `hub.url`
+(keeping its scheme and credentials), `project` over `hub.project` and
+`analyze.project`, `presets`, `build` and `incremental-build` over the
+`analyze` settings. So the editor settings only need the credentials. Lines
+edited by hand in the section are kept, everything outside it is left alone.
+
 ## How the project is detected
 
-Without `hub.project` and `analyze.projectFile`, the server looks for the
+Without a project in the workspace configuration, `hub.project` and
+`analyze.projectFile`, the server looks for the
 project files of an earlier `codesonar analyze` in the workspace root and
 in `.codesonar`, e.g. `mixxx.prj_files`. Their prefix is used for new
 analyses, and the hub project of their last analysis is shown. Without
@@ -123,10 +157,11 @@ argument, an object.
 | `codesonar.uncache`         | `{analysis}`                                     | Removes the analysis from the cache of downloaded analyses and returns the analyses like `codesonar.analyses` |
 | `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
 | `codesonar.hide`            |                                                  | Hides the shown analysis and its warnings until one is loaded with `codesonar.load`. Returns the status |
-| `codesonar.status`          |                                                  | `{loaded, hidden, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
+| `codesonar.status`          |                                                  | `{loaded, hidden, hub, project, presets, conf, name, key, hubId, url, total, shown, counts}`; `conf` is the workspace configuration, if it exists |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
-| `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, incremental, workspaceConf}`: the project files; `createConf` creates the configuration file from CodeSonar's template. `workspaceConf` is the configuration file of the workspace, if it exists |
+| `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, incremental, workspaceConf, workspaceConfExists, section, suggested: {project, build, hubAddress}}`: the project files and the workspace configuration; `createConf` creates the configuration file of the project from CodeSonar's template, `section` tells whether the workspace configuration has the section of the server |
+| `codesonar.initConf`        | `{project, build, hubAddress}`                   | Starts the workspace configuration with them and returns the project |
 | `codesonar.presets`         |                                                  | `[{name, description, selected}]`: the presets of the CodeSonar installation |
 | `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |

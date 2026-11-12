@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::config::{Config, expand_home};
 use crate::detect::LocalProject;
+use crate::workspace::setting;
 
 /// The project prefix of workspaces without project files.
 const DEFAULT_PREFIX: &str = ".codesonar/project";
@@ -138,15 +139,9 @@ pub fn is_incremental(workspace_conf: Option<&Path>, prefix: &Path) -> bool {
     ]
     .into_iter()
     .flatten()
-    .find_map(|conf| incremental_setting(&std::fs::read_to_string(conf).ok()?))
+    .find_map(|conf| setting(&std::fs::read_to_string(conf).ok()?, "INCREMENTAL_BUILD"))
+    .map(|value| value.eq_ignore_ascii_case("yes"))
     .unwrap_or(true)
-}
-
-fn incremental_setting(conf: &str) -> Option<bool> {
-    conf.lines().rev().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        (key.trim() == "INCREMENTAL_BUILD").then(|| value.trim().eq_ignore_ascii_case("yes"))
-    })
 }
 
 /// Whether the project was analyzed before, so that a new analysis can be
@@ -215,7 +210,7 @@ fn installation(command: &str) -> Option<PathBuf> {
         .find(|dir| dir.join("template.conf").is_file())
 }
 
-fn template(command: &str) -> Option<PathBuf> {
+pub fn template(command: &str) -> Option<PathBuf> {
     Some(installation(command)?.join("template.conf"))
 }
 

@@ -17,3 +17,4 @@ pub mod source;
 pub mod store;
 pub mod tracking;
 pub mod warning;
+pub mod workspace;

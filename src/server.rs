@@ -17,8 +17,8 @@ use crate::analyze;
 use crate::cache::Cache;
 use crate::code_action;
 use crate::commands::{
-    self, AnalyzeArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND,
-    ProjectArgs, REFRESH_COMMAND,
+    self, AnalyzeArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs, InitConfArgs, LoadArgs,
+    OPEN_IN_HUB_COMMAND, ProjectArgs, REFRESH_COMMAND,
 };
 use crate::config::{Config, HubConfig, expand_home};
 use crate::detect::{self, LocalProject};
@@ -30,6 +30,7 @@ use crate::source::{self, Loaded, Selection};
 use crate::store::Store;
 use crate::tracking::Anchor;
 use crate::warning::{self, Rule, Warning};
+use crate::workspace::WorkspaceConf;
 
 const WATCH_PATTERN: &str = "**/*.sarif";
 /// How often the download progress is reported at most.
@@ -69,6 +70,8 @@ struct State {
     can_show_progress: bool,
     /// The hub chosen with `codesonar.connect`, instead of the configured.
     connected: Option<HubConfig>,
+    /// The configuration of the workspace in its `codesonar.conf`.
+    workspace: WorkspaceConf,
     /// The CodeSonar project files of the workspace.
     local: Option<LocalProject>,
     /// The hub project of the workspace, if none is chosen or configured.
@@ -79,6 +82,12 @@ impl State {
     /// Sets the settings and the hub client they describe.
     fn configure(&mut self, config: Config) -> anyhow::Result<()> {
         self.config = config;
+        self.workspace = match &self.root {
+            Some(root) => {
+                WorkspaceConf::read(&root.join(expand_home(&self.config.analyze.conf_file)))
+            }
+            None => WorkspaceConf::default(),
+        };
         self.hub = match self.hub_config() {
             Some(hub) => Some(Arc::new(Hub::new(&hub)?)),
             None => None,
@@ -86,10 +95,14 @@ impl State {
         Ok(())
     }
 
-    /// The hub settings: the chosen hub, else the configured one, with the
-    /// detected project if there is no other.
+    /// The hub settings: the chosen hub, else the one of the workspace
+    /// configuration and the settings, with the detected project if there
+    /// is no other.
     fn hub_config(&self) -> Option<HubConfig> {
-        let mut hub = self.connected.clone().or_else(|| self.config.hub.clone())?;
+        let mut hub = self
+            .connected
+            .clone()
+            .or_else(|| self.config.with_workspace(&self.workspace).hub)?;
 
         if hub.project.is_none() && hub.analysis_id.is_empty() {
             hub.project = self.detected_project.clone();
@@ -98,12 +111,18 @@ impl State {
         Some(hub)
     }
 
-    /// The settings, with the chosen hub and the detected project.
+    /// The settings, with the workspace configuration, the chosen hub and
+    /// the detected project.
     fn effective_config(&self) -> Config {
         Config {
             hub: self.hub_config(),
-            ..self.config.clone()
+            ..self.config.with_workspace(&self.workspace)
         }
+    }
+
+    /// The workspace configuration file, if it exists.
+    fn workspace_file(&self) -> Option<&Path> {
+        self.workspace.file.as_deref().filter(|file| file.is_file())
     }
 
     /// Whether the hub project is still unknown, so it may be detected.
@@ -146,7 +165,8 @@ impl State {
             "hidden": self.hidden,
             "hub": hub.map(|hub| &hub.url),
             "project": hub.and_then(|hub| hub.project.as_ref()),
-            "presets": self.config.analyze.presets,
+            "presets": self.effective_config().analyze.presets,
+            "conf": self.workspace_file(),
         });
         let Some(analysis) = &self.analysis else {
             return status;
@@ -216,6 +236,14 @@ async fn report(progress: Progress, mut downloads: watch::Receiver<Downloaded>) 
     }
 
     progress
+}
+
+/// The `HUB_ADDRESS` of a hub URL: `host:port`, if the hub is not below a
+/// path.
+fn hub_address(url: &str) -> Option<String> {
+    let address = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let address = address.trim_end_matches('/');
+    (!address.is_empty() && !address.contains('/')).then(|| address.to_string())
 }
 
 fn open_memory(config: &Config) -> Option<Memory> {
@@ -652,6 +680,19 @@ impl Backend {
                 hub.analysis_id.clear();
             }
 
+            // The workspace keeps the chosen project, and its hub if
+            // CodeSonar can address it.
+            if let Some(project) = &args.project
+                && state.workspace.file.is_some()
+            {
+                state.workspace.project = Some(format!("/{project}"));
+                state.workspace.write()?;
+
+                if let Some(address) = hub_address(&hub.url) {
+                    state.workspace.write_setting("HUB_ADDRESS", &address)?;
+                }
+            }
+
             // Kept apart from the settings, which clients may send again.
             state.connected = Some(hub);
             let config = state.config.clone();
@@ -754,6 +795,29 @@ impl Backend {
         Ok(value)
     }
 
+    /// Reads the workspace configuration again, and shows the analysis it
+    /// names if that changed.
+    async fn workspace_changed(&self) {
+        let reload = {
+            let mut state = self.state.write().await;
+            let before = state.hub_config();
+            let config = state.config.clone();
+
+            if let Err(error) = state.configure(config) {
+                drop(state);
+                self.error(format!("invalid workspace configuration: {error:#}"))
+                    .await;
+                return;
+            }
+
+            state.hub_config() != before
+        };
+
+        if reload {
+            self.reload().await;
+        }
+    }
+
     /// Removes an analysis from the cache of downloaded analyses.
     async fn uncache(&self, id: u64) -> anyhow::Result<()> {
         let cache = Cache::of(&self.state.read().await.effective_config());
@@ -830,28 +894,104 @@ impl Backend {
     }
 
     async fn project(&self, args: ProjectArgs) -> anyhow::Result<Value> {
+        // The file may have changed without a notification.
+        let changed = {
+            let state = self.state.read().await;
+            let file = state.workspace.file.as_deref();
+            file.is_some_and(|file| WorkspaceConf::read(file) != state.workspace)
+        };
+
+        if changed {
+            self.workspace_changed().await;
+        }
+
         let state = self.state.read().await;
         let root = state.root.as_deref().context("no workspace folder")?;
         let prefix = state.prefix(root);
         let created = args.create_conf && analyze::create_conf(&state.config, &prefix)?;
         let conf = analyze::conf_file(&prefix);
         let workspace_conf = analyze::workspace_conf(&state.config, root);
+        // What the workspace configuration could start with: the folder
+        // name, an incremental build and the hub address of the file, not
+        // what the editor settings or another workspace use.
+        let project = root.file_name().map(|name| name.to_string_lossy());
+        let hub_address = &state.workspace.hub_address;
         Ok(json!({
             "prefix": prefix,
             "confExists": conf.exists(),
             "conf": conf,
             "created": created,
             "incremental": analyze::is_incremental(workspace_conf.as_deref(), &prefix),
-            "workspaceConf": workspace_conf,
+            "workspaceConf": state.workspace.file,
+            "workspaceConfExists": workspace_conf.is_some(),
+            "section": state.workspace.has_section,
+            "suggested": {
+                "project": project,
+                "build": "make -B",
+                "incremental": state.workspace.incremental.unwrap_or(true),
+                "incrementalBuild": "make",
+                "hubAddress": hub_address,
+            },
         }))
     }
 
+    /// Starts the workspace configuration with the basic settings: the
+    /// section with the hub project and the build commands, and
+    /// `HUB_ADDRESS`.
+    async fn init_conf(&self, args: InitConfArgs) -> anyhow::Result<Value> {
+        {
+            let mut state = self.state.write().await;
+
+            if state.workspace.file.is_none() {
+                bail!("no workspace folder");
+            }
+
+            let project = args.project.trim().trim_end_matches('/');
+            state.workspace.project = Some(match project.starts_with('/') {
+                true => project.to_string(),
+                false => format!("/{project}"),
+            });
+            let words = |command: &str| -> Vec<String> {
+                command.split_whitespace().map(str::to_string).collect()
+            };
+            let build = words(&args.build);
+            // Without incremental analyses, every analysis is a full one.
+            let command = words(&args.incremental_build);
+            let enabled = args.incremental.unwrap_or(!command.is_empty());
+            let incremental = if enabled { command } else { Vec::new() };
+            let incremental_setting = if enabled { "Yes" } else { "No" };
+            state.workspace.build = Some(build).filter(|build| !build.is_empty());
+            state.workspace.incremental_build = Some(incremental).filter(|b| !b.is_empty());
+            state.workspace.write()?;
+            state
+                .workspace
+                .write_setting("INCREMENTAL_BUILD", incremental_setting)?;
+
+            if !args.hub_address.trim().is_empty() {
+                state
+                    .workspace
+                    .write_setting("HUB_ADDRESS", args.hub_address.trim())?;
+            }
+        }
+
+        self.workspace_changed().await;
+        self.project(ProjectArgs::default()).await
+    }
+
     async fn watch_files(&self) {
+        let conf = self.state.read().await.config.analyze.conf_file.clone();
+        let conf_pattern = conf
+            .file_name()
+            .map(|name| format!("**/{}", name.to_string_lossy()));
         let options = DidChangeWatchedFilesRegistrationOptions {
-            watchers: vec![FileSystemWatcher {
-                glob_pattern: GlobPattern::String(WATCH_PATTERN.to_string()),
-                kind: None,
-            }],
+            watchers: [Some(WATCH_PATTERN.to_string()), conf_pattern]
+                .into_iter()
+                .flatten()
+                .map(|pattern| FileSystemWatcher {
+                    glob_pattern: GlobPattern::String(pattern),
+                    kind: None,
+                })
+                .collect(),
         };
         let registration = Registration {
             id: "codesonar-watch-sarif".to_string(),
@@ -1059,21 +1199,30 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let sarif_file = {
+        let (sarif_file, conf) = {
             let state = self.state.read().await;
-            state.config.sarif_file(state.root.as_deref())
+            (
+                state.config.sarif_file(state.root.as_deref()),
+                state.workspace.file.clone(),
+            )
         };
+        let changed = |file: &Path| {
+            params
+                .changes
+                .iter()
+                .any(|change| change.uri.to_file_path().ok().as_deref() == Some(file))
+        };
+
+        if conf.as_deref().is_some_and(changed) {
+            self.workspace_changed().await;
+            return;
+        }
 
         let Some(sarif_file) = sarif_file else {
             return;
         };
 
-        let changed = params
-            .changes
-            .iter()
-            .any(|change| change.uri.to_file_path().ok().as_ref() == Some(&sarif_file));
-
-        if changed {
+        if changed(&sarif_file) {
             self.reload().await;
         }
     }
@@ -1160,9 +1309,10 @@ impl LanguageServer for Backend {
             commands::WARNINGS => Ok(self.state.read().await.warnings()),
             commands::ANALYZE_COMMAND => self.analyze_command(parse(arguments)?).await,
             commands::PROJECT => self.project(parse(arguments)?).await,
+            commands::INIT_CONF => self.init_conf(required(arguments)?).await,
             commands::PRESETS => {
                 let state = self.state.read().await;
-                analyze::presets(&state.config).map(|presets| json!(presets))
+                analyze::presets(&state.effective_config()).map(|presets| json!(presets))
             }
             command => {
                 return Err(Error::invalid_params(format!("unknown command {command}")));

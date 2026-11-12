@@ -47,17 +47,27 @@ pub const WARNINGS: &str = "codesonar.warnings";
 /// optional. Returns `{command, cwd, temporaryFiles}`.
 pub const ANALYZE_COMMAND: &str = "codesonar.analyzeCommand";
 /// Returns the CodeSonar project of the workspace: `{prefix, conf,
-/// confExists, created, incremental, workspaceConf}`. With `{createConf:
-/// true}`, the configuration file is created from CodeSonar's template if
-/// it does not exist. `workspaceConf` is the configuration file of the
-/// workspace, if it exists.
+/// confExists, created, incremental, workspaceConf, workspaceConfExists,
+/// section, suggested: {project, build, incremental, incrementalBuild,
+/// hubAddress}}`.
+/// With `{createConf: true}`, the configuration file is created from
+/// CodeSonar's template if it does not exist. `workspaceConf` is the
+/// configuration file of the workspace, `section` whether it has the
+/// section of codesonar-lsp, and `suggested` what [`INIT_CONF`] could start
+/// it with.
 pub const PROJECT: &str = "codesonar.project";
+/// Starts the workspace configuration: `{project, build, incremental,
+/// incrementalBuild, hubAddress}`. The project and the build commands are
+/// written into its section, `INCREMENTAL_BUILD` and `HUB_ADDRESS` outside
+/// of it.
+/// Returns the project like [`PROJECT`].
+pub const INIT_CONF: &str = "codesonar.initConf";
 
 /// Returns the presets of the CodeSonar installation: `[{name,
 /// description, selected}]`. The setting `analyze.presets` selects them.
 pub const PRESETS: &str = "codesonar.presets";
 
-pub const ALL: [&str; 16] = [
+pub const ALL: [&str; 17] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
@@ -73,14 +83,16 @@ pub const ALL: [&str; 16] = [
     WARNINGS,
     ANALYZE_COMMAND,
     PROJECT,
+    INIT_CONF,
     PRESETS,
 ];
 
 /// Sent after an analysis was loaded and once more after the analyzed
 /// code was read from the hub, with the status:
-/// `{loaded, hidden, hub, project, presets, name, key, hubId, url, total,
-/// shown, counts}`. Without a loaded analysis, only the first five are
-/// set. `hidden` tells whether the analysis was hidden with [`HIDE`].
+/// `{loaded, hidden, hub, project, presets, conf, name, key, hubId, url,
+/// total, shown, counts}`. Without a loaded analysis, only the first six
+/// are set. `hidden` tells whether the analysis was hidden with [`HIDE`],
+/// `conf` is the workspace configuration, if it exists.
 pub enum Loaded {}
 
 impl Notification for Loaded {
@@ -130,6 +142,25 @@ pub struct AnalyzeArgs {
 #[serde(default, rename_all = "camelCase")]
 pub struct ProjectArgs {
     pub create_conf: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitConfArgs {
+    pub project: String,
+    /// The full rebuild of the first analysis.
+    #[serde(default)]
+    pub build: String,
+    /// Whether analyses are incremental (`INCREMENTAL_BUILD`), by default
+    /// if there is an incremental build. Without, every analysis is a full
+    /// one.
+    #[serde(default)]
+    pub incremental: Option<bool>,
+    /// The build of later, incremental analyses.
+    #[serde(default)]
+    pub incremental_build: String,
+    #[serde(default)]
+    pub hub_address: String,
 }
 
 /// Explains the warnings of a file: `{uri, fingerprint}` picks one by its

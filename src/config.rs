@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::workspace::WorkspaceConf;
+
 /// Environment variable used when no hub password is configured.
 pub const PASSWORD_ENV: &str = "CODESONAR_PASSWORD";
 
@@ -202,6 +204,53 @@ impl Config {
             Some(root) if file.is_relative() => Some(root.join(file)),
             _ => Some(file.clone()),
         }
+    }
+
+    /// The settings with the ones of the workspace configuration, which
+    /// win: its hub address keeps the scheme and the credentials of the
+    /// configured hub.
+    pub fn with_workspace(&self, workspace: &WorkspaceConf) -> Self {
+        let mut config = self.clone();
+
+        if let Some(address) = &workspace.hub_address {
+            let mut hub = config.hub.take().unwrap_or_default();
+            let scheme = hub
+                .url
+                .split_once("://")
+                .map(|(scheme, _)| scheme)
+                .unwrap_or("http");
+            let url = format!("{scheme}://{address}");
+
+            if hub.url.trim_end_matches('/') != url {
+                hub.url = url;
+                hub.analysis_id.clear();
+            }
+
+            config.hub = Some(hub);
+        }
+
+        if let (Some(hub), Some(project)) = (&mut config.hub, workspace.project_name()) {
+            hub.project = Some(project.to_string());
+            hub.analysis_id.clear();
+        }
+
+        if let Some(project) = &workspace.project {
+            config.analyze.project = Some(project.clone());
+        }
+
+        if let Some(presets) = &workspace.presets {
+            config.analyze.presets = presets.clone();
+        }
+
+        if let Some(build) = &workspace.build {
+            config.analyze.build_command = build.clone();
+        }
+
+        if let Some(build) = &workspace.incremental_build {
+            config.analyze.incremental_build_command = build.clone();
+        }
+
+        config
     }
 
     pub fn map_path(&self, path: &str) -> String {
