@@ -1,16 +1,15 @@
 # codesonar-lsp
 
 CodeSonar warnings in the editor: a language server that does all the work,
-and editor clients that build on it.
+and editor clients that build on it, like [codesonar.vim] for Vim.
 
-| Folder              | Content                                              |
-| ------------------- | ---------------------------------------------------- |
-| `server`            | The language server, in Rust                         |
-| `vim`               | Vim plugin, on top of [yegappan/lsp]                 |
-| `examples/demo`     | C file with a matching SARIF file                    |
+| Folder                  | Content                                              |
+| ----------------------- | ---------------------------------------------------- |
+| `src`, `tests`          | The language server, in Rust                         |
+| `examples/demo`         | C file with a matching SARIF file                    |
 | `examples/test_project` | C program whose analyses are in the hub project `test_project` |
 
-[yegappan/lsp]: https://github.com/yegappan/lsp
+[codesonar.vim]: https://github.com/jclsn/codesonar.vim
 
 ## Features
 
@@ -40,14 +39,7 @@ The warnings come from the CodeSonar hub or from an exported SARIF file.
 cargo install --path .
 ```
 
-For the Vim plugin, add the `vim` folder to the runtime path, e.g. with
-vim-plug:
-
-```vim
-Plug '~/Workspace/codesonar-lsp', {'rtp': 'vim'}
-```
-
-See `:help codesonar` for its commands.
+For Vim, install the plugin [codesonar.vim] and see `:help codesonar`.
 
 ## Settings
 
@@ -143,7 +135,12 @@ sending it. If the client supports `window.workDoneProgress`, the server
 reports the download as work done progress, e.g. `Downloading 4.2 MB`.
 After an analysis was shown, it sends `codesonar/loaded` with the status.
 
-## Other editors
+## Editors
+
+### Vim
+
+[codesonar.vim] registers the server with yegappan/lsp and adds commands
+for analyses, explanations and the hub.
 
 ### Neovim
 
@@ -186,11 +183,10 @@ are placeholders and only work with a matching analysis.
 ## Development
 
 ```sh
-cd server
 cargo fmt
 cargo clippy --all-targets
 cargo test
-
-cd ../vim
-test/run.sh    # needs yegappan/lsp in ~/.vim/plugged/lsp or $LSP_PLUGIN
 ```
+
+The tests of codesonar.vim run against the installed server, so run them
+after `cargo install --path .` as well.
