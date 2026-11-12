@@ -240,15 +240,26 @@ impl Hub {
             .with_context(|| format!("cannot download {path}"))
     }
 
-    /// Signs in once with the configured credentials, then requests `path`.
-    /// An expired session is renewed once.
     async fn response(&self, path: &str) -> anyhow::Result<Response> {
+        self.send(path, "download", |url| self.client.get(url))
+            .await
+    }
+
+    /// Signs in once with the configured credentials, then sends the
+    /// request that `request` builds for the URL of `path`. An expired
+    /// session is renewed once. `action` describes the request in errors.
+    async fn send(
+        &self,
+        path: &str,
+        action: &str,
+        request: impl Fn(Url) -> RequestBuilder,
+    ) -> anyhow::Result<Response> {
         let url = self.url(path)?;
         let mut renewed = false;
 
         loop {
             let token = self.token(renewed).await?;
-            let mut request = self.client.get(url.clone());
+            let mut request = request(url.clone());
 
             if let Some(token) = &token {
                 request = request.bearer_auth(token);
@@ -257,7 +268,7 @@ impl Hub {
             let response = request
                 .send()
                 .await
-                .with_context(|| format!("cannot download {url}"))?;
+                .with_context(|| format!("cannot {action} {url}"))?;
             let status = response.status();
 
             if token.is_some()
@@ -270,7 +281,7 @@ impl Hub {
 
             return check(response)
                 .await
-                .with_context(|| format!("cannot download {url}"));
+                .with_context(|| format!("cannot {action} {url}"));
         }
     }
 
