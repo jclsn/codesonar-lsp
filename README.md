@@ -89,7 +89,8 @@ the `analyze` settings keep the shown analysis.
 | `stateDir`               | Where the analyzed code is remembered. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
 | `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
 | `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Detected if not set, else `.codesonar/project`. |
-| `analyze.buildCommand`   | Build command, a string or a list. Default: `make -B`.          |
+| `analyze.buildCommand`   | Build command, a string or a list. It must build everything, since CodeSonar only sees what is compiled. Default: `make -B`. |
+| `analyze.incrementalBuildCommand` | Build command of incremental analyses, which only need what changed since the last analysis. Default: `make`. |
 | `analyze.confFile`       | Configuration file of the workspace, relative to its root, passed with `-conf-file` if it exists. Default: `codesonar.conf`. |
 | `analyze.project`        | Hub project path. Default: `/` and `hub.project`.               |
 | `analyze.presets`        | CodeSonar presets of analyses, e.g. `["misrac2025", "cert"]`. |
@@ -129,7 +130,7 @@ argument, an object.
 | `codesonar.status`          |                                                  | `{loaded, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
-| `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, workspaceConf}`: the project files; `createConf` creates the configuration file from CodeSonar's template. `workspaceConf` is the configuration file of the workspace, if it exists |
+| `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, incremental, workspaceConf}`: the project files; `createConf` creates the configuration file from CodeSonar's template. `workspaceConf` is the configuration file of the workspace, if it exists |
 | `codesonar.presets`         |                                                  | `[{name, description, selected}]`: the presets of the CodeSonar installation |
 | `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |

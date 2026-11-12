@@ -36,9 +36,14 @@ pub struct AnalyzeConfig {
     /// Project prefix, relative to the workspace root. Detected from the
     /// project files of the workspace if not set.
     pub project_file: Option<PathBuf>,
-    /// Build command, as a list or a string split at whitespace.
+    /// Build command, as a list or a string split at whitespace. It
+    /// builds everything, since CodeSonar only sees what is compiled.
     #[serde(deserialize_with = "words")]
     pub build_command: Vec<String>,
+    /// Build command of incremental analyses, which only need what changed
+    /// since the last one.
+    #[serde(deserialize_with = "words")]
+    pub incremental_build_command: Vec<String>,
     /// Configuration file with the settings of the workspace, relative to
     /// its root. Passed with `-conf-file` if it exists.
     pub conf_file: PathBuf,
@@ -56,6 +61,7 @@ impl Default for AnalyzeConfig {
             command: "codesonar".into(),
             project_file: None,
             build_command: vec!["make".into(), "-B".into()],
+            incremental_build_command: vec!["make".into()],
             conf_file: "codesonar.conf".into(),
             project: None,
             presets: Vec::new(),

@@ -782,6 +782,7 @@ impl Backend {
             "confExists": conf.exists(),
             "conf": conf,
             "created": created,
+            "incremental": analyze::is_incremental(workspace_conf.as_deref(), &prefix),
             "workspaceConf": workspace_conf,
         }))
     }

@@ -94,7 +94,14 @@ pub fn command(
     command.extend(analyze.args.iter().cloned());
     command.push(hub.url.clone());
 
-    command.extend(analyze.build_command.iter().cloned());
+    // An incremental analysis takes what was not compiled from its parent.
+    let incremental =
+        is_incremental(workspace_conf.as_deref(), prefix) && has_project_files(prefix);
+    let build = match incremental {
+        true => &analyze.incremental_build_command,
+        false => &analyze.build_command,
+    };
+    command.extend(build.iter().cloned());
 
     Ok(AnalyzeCommand {
         command,
@@ -118,6 +125,36 @@ pub fn prefix(config: &Config, root: &Path, local: Option<&LocalProject>) -> Pat
 pub fn workspace_conf(config: &Config, root: &Path) -> Option<PathBuf> {
     let conf = root.join(expand_home(&config.analyze.conf_file));
     conf.is_file().then_some(conf)
+}
+
+/// Whether analyses of the project are incremental: the last setting of
+/// `INCREMENTAL_BUILD`, in the workspace configuration, which CodeSonar
+/// reads last, or else in the project configuration. CodeSonar's default
+/// is incremental.
+pub fn is_incremental(workspace_conf: Option<&Path>, prefix: &Path) -> bool {
+    [
+        workspace_conf.map(Path::to_path_buf),
+        Some(conf_file(prefix)),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|conf| incremental_setting(&std::fs::read_to_string(conf).ok()?))
+    .unwrap_or(true)
+}
+
+fn incremental_setting(conf: &str) -> Option<bool> {
+    conf.lines().rev().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "INCREMENTAL_BUILD").then(|| value.trim().eq_ignore_ascii_case("yes"))
+    })
+}
+
+/// Whether the project was analyzed before, so that a new analysis can be
+/// its incremental child.
+fn has_project_files(prefix: &Path) -> bool {
+    let mut files = prefix.as_os_str().to_owned();
+    files.push(".prj_files");
+    Path::new(&files).join("aid.txt").is_file()
 }
 
 /// The configuration file of the project.
