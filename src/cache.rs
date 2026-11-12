@@ -129,3 +129,70 @@ pub fn default_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".cache")))?;
     Some(cache.join("codesonar-lsp"))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn keeps_the_most_recently_used_analyses() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path().join("p"), 2);
+        cache.put("1", "one").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        cache.put("2", "two").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+
+        assert_eq!(cache.get("1").as_deref(), Some("one"), "used again");
+
+        std::thread::sleep(Duration::from_millis(20));
+        cache.put("3", "three").unwrap();
+
+        assert!(cache.contains("1"));
+        assert!(!cache.contains("2"), "least recently used");
+        assert!(cache.contains("3"));
+        assert!(cache.remove("3").unwrap());
+        assert!(!cache.remove("3").unwrap());
+        assert_eq!(cache.get("3"), None);
+    }
+
+    #[test]
+    fn caches_nothing_with_size_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path().to_path_buf(), 0);
+        cache.put("1", "one").unwrap();
+
+        assert!(!cache.contains("1"));
+    }
+
+    #[test]
+    fn accepts_only_hub_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path().join("p"), 2);
+        cache.put("../x", "outside").unwrap();
+        cache.put("", "empty").unwrap();
+
+        assert!(!dir.path().join("x.sarif").exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn has_a_directory_per_hub_and_project() {
+        let config = Config::from_value(&serde_json::json!({
+            "hub": {"url": "http://hub:7340", "project": "my app"},
+            "cacheDir": "/cache",
+        }))
+        .unwrap();
+
+        let cache = Cache::of(&config).unwrap();
+
+        assert_eq!(cache.dir, Path::new("/cache/http___hub_7340/my_app"));
+        assert_eq!(cache.size, DEFAULT_SIZE);
+
+        let config =
+            Config::from_value(&serde_json::json!({"hub": {"url": "http://hub"}})).unwrap();
+        assert!(Cache::of(&config).is_none(), "without a project");
+    }
+}

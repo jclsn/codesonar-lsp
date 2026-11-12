@@ -833,6 +833,42 @@ fn shows_no_progress_without_the_capability() {
 }
 
 #[test]
+fn caches_finished_analyses() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut options = hub_options(dir.path(), &hub);
+    options["cacheDir"] = json!(dir.path().join("cache"));
+
+    let mut client = Client::initialize(dir.path(), options);
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    let downloads = || {
+        runtime
+            .block_on(hub.received_requests())
+            .unwrap()
+            .iter()
+            .filter(|request| request.url.path() == "/analysis/3-allwarnings.sarif")
+            .count()
+    };
+
+    let analyses = client.command("codesonar.analyses", Value::Null);
+    assert_eq!(analyses["analyses"][1]["cached"], true, "finished");
+    assert_eq!(analyses["analyses"][0]["cached"], false, "running");
+
+    client.command("codesonar.load", json!({"analysis": 3}));
+    assert_eq!(downloads(), 1, "loaded from the cache");
+
+    let analyses = client.command("codesonar.uncache", json!({"analysis": 3}));
+    assert_eq!(analyses["analyses"][1]["cached"], false);
+
+    client.command("codesonar.load", json!({"analysis": 3}));
+    assert_eq!(downloads(), 2);
+
+    client.shutdown();
+}
+
+#[test]
 fn deletes_analyses() {
     use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, ResponseTemplate};
