@@ -657,6 +657,136 @@ mod tests {
         );
     }
 
+    /// Analysis `id` of project 1 on `server`, which is gone after its
+    /// project was looked up if `deleted`, and the project page answering
+    /// its deletion with `response`.
+    async fn deletable(server: &MockServer, id: u64, deleted: bool, response: ResponseTemplate) {
+        let analysis = json!({"id": id, "state": "FINISHED", "project": {"id": 1, "name": "p"}});
+        let mut found = Mock::given(method("GET"))
+            .and(path(format!("/analysis/{id}.json")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(analysis))
+            .with_priority(1);
+
+        if deleted {
+            found = found.up_to_n_times(1);
+        }
+
+        found.mount(server).await;
+        Mock::given(method("GET"))
+            .and(path(format!("/analysis/{id}.json")))
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(
+                    json!({"error": format!("Analysis {id} not found"), "status": 404}),
+                ),
+            )
+            .mount(server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/project/1.json"))
+            .and(body_string_contains(format!("remove_analysis_id={id}")))
+            .respond_with(response)
+            .mount(server)
+            .await;
+    }
+
+    fn removed(id: u64, result: &str, message: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(json!({"change": {"results": [
+            {"action": "remove_analysis", "item": {"type": "analysis", "id": id},
+             "result": result, "message": message, "details": "kill it first"},
+        ]}}))
+    }
+
+    #[tokio::test]
+    async fn deletes_analyses_with_the_project_form() {
+        let server = MockServer::start().await;
+        deletable(&server, 7, true, removed(7, "success", "Removed")).await;
+
+        let hub = Hub::new(&config(&server, "")).unwrap();
+        assert_eq!(hub.delete_analysis(7).await.unwrap(), Deletion::Deleted);
+
+        let posts = server.received_requests().await.unwrap();
+        assert!(
+            posts
+                .iter()
+                .any(|r| r.method.as_str() == "POST" && r.url.path() == "/project/1.json")
+        );
+    }
+
+    #[tokio::test]
+    async fn reports_analyses_that_cannot_be_deleted() {
+        let server = MockServer::start().await;
+
+        deletable(
+            &server,
+            7,
+            false,
+            removed(7, "failure", "Analysis is running"),
+        )
+        .await;
+
+        deletable(
+            &server,
+            8,
+            false,
+            ResponseTemplate::new(403)
+                .set_body_string(r#"{"status":403,"error":"Permission Denied"}"#),
+        )
+        .await;
+
+        // Accepted but ignored.
+        deletable(
+            &server,
+            9,
+            false,
+            ResponseTemplate::new(200).set_body_json(json!({"id": 9})),
+        )
+        .await;
+
+        let hub = Hub::new(&config(&server, "")).unwrap();
+        assert_eq!(
+            hub.delete_analysis(7).await.unwrap(),
+            Deletion::Refused(
+                "the hub did not delete analysis 7 (Analysis is running: kill it first)".into()
+            )
+        );
+        assert_eq!(
+            hub.delete_analysis(8).await.unwrap(),
+            Deletion::Refused(
+                "anonymous hub users may not delete analysis 8 (Permission Denied)".into()
+            )
+        );
+        assert_eq!(
+            hub.delete_analysis(9).await.unwrap(),
+            Deletion::Refused("the hub kept analysis 9".into())
+        );
+
+        let error = format!("{:#}", hub.delete_analysis(10).await.unwrap_err());
+        assert!(error.contains("404"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn names_the_user_who_may_not_delete() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/session/create-basic-auth/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"bearer": "1/t"}"#))
+            .mount(&server)
+            .await;
+
+        deletable(&server, 7, false, ResponseTemplate::new(403)).await;
+
+        let config = HubConfig {
+            username: Some("alice".into()),
+            password: Some("secret".into()),
+            ..config(&server, "")
+        };
+        assert_eq!(
+            Hub::new(&config).unwrap().delete_analysis(7).await.unwrap(),
+            Deletion::Refused("the hub user alice may not delete analysis 7".into())
+        );
+    }
+
     #[tokio::test]
     async fn signs_in_with_basic_auth() {
         let server = MockServer::start().await;

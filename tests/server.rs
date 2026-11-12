@@ -766,6 +766,108 @@ fn shows_no_progress_without_the_capability() {
 }
 
 #[test]
+fn deletes_analyses() {
+    use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let deleted = json!({"change": {"results": [{"action": "remove_analysis",
+        "item": {"type": "analysis", "id": 3}, "result": "success", "message": "Removed"}]}});
+
+    runtime.block_on(async {
+        // The analyses until they are deleted: the project of 5, which the
+        // user may not delete, is looked up twice.
+        for (id, lookups) in [(3, 1), (4, 1), (5, 2)] {
+            Mock::given(method("GET"))
+                .and(path(format!("/analysis/{id}.json")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    json!({"id": id, "state": "FINISHED", "project": {"id": 1, "name": "test"}}),
+                ))
+                .up_to_n_times(lookups)
+                .with_priority(1)
+                .mount(&hub)
+                .await;
+
+            Mock::given(method("GET"))
+                .and(path(format!("/analysis/{id}.json")))
+                .respond_with(ResponseTemplate::new(404))
+                .with_priority(2)
+                .mount(&hub)
+                .await;
+        }
+
+        Mock::given(method("POST"))
+            .and(path("/project/1.json"))
+            .and(body_string_contains("remove_analysis_id=5"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(json!({"status": 403, "error": "Permission Denied"})),
+            )
+            .with_priority(1)
+            .mount(&hub)
+            .await;
+
+        for id in [3, 4] {
+            Mock::given(method("POST"))
+                .and(path("/project/1.json"))
+                .and(body_string_contains(format!("remove_analysis_id={id}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(&deleted))
+                .with_priority(1)
+                .expect(1)
+                .mount(&hub)
+                .await;
+        }
+    });
+
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut client = Client::initialize(dir.path(), hub_options(dir.path(), &hub));
+    let main = uri(dir.path().join("src/main.c"));
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    // Another analysis than the shown one.
+    let analyses = client.command("codesonar.deleteAnalysis", json!({"analysis": 4}));
+    assert_eq!(analyses["project"], "test");
+    assert_eq!(analyses["deleted"], true);
+
+    // One the user may not delete.
+    let refused = client.command("codesonar.deleteAnalysis", json!({"analysis": 5}));
+    assert_eq!(refused["deleted"], false);
+    assert_eq!(
+        refused["message"],
+        "anonymous hub users may not delete analysis 5 (Permission Denied)"
+    );
+    assert_eq!(refused["analyses"].as_array().unwrap().len(), 2);
+
+    assert_eq!(
+        client.command("codesonar.status", Value::Null)["hubId"],
+        "3"
+    );
+
+    // The shown analysis, without another finished one.
+    runtime.block_on(async {
+        Mock::given(path("/project/1.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"rows": [
+                {"analysis": "running", "state": "ANALYZING", "url": "/analysis/4.json"},
+            ]})))
+            .with_priority(1)
+            .mount(&hub)
+            .await;
+    });
+
+    client.command("codesonar.deleteAnalysis", json!({"analysis": 3}));
+
+    let status = client.expect("codesonar/loaded", |p| p["loaded"] == false);
+    assert_eq!(status["hubId"], Value::Null);
+
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] == json!([])
+    });
+
+    client.shutdown();
+}
+
+#[test]
 fn explains_rules_with_titles_from_the_hub() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
