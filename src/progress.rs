@@ -88,3 +88,29 @@ pub fn download(downloaded: Downloaded) -> (String, Option<u32>) {
 fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_000_000.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn describes_downloads_of_unknown_size() {
+        let downloaded = Downloaded {
+            received: 4_250_000,
+            total: None,
+        };
+        assert_eq!(download(downloaded), ("Downloading 4.2 MB".into(), None));
+    }
+
+    #[test]
+    fn describes_downloads_of_known_size() {
+        let downloaded = Downloaded {
+            received: 500_000,
+            total: Some(2_000_000),
+        };
+        assert_eq!(
+            download(downloaded),
+            ("Downloading 0.5 MB of 2.0 MB".into(), Some(25))
+        );
+    }
+}

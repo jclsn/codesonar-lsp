@@ -141,7 +141,11 @@ impl Client {
 
             if message.get("method").is_some() && message.get("id").is_some() {
                 let id = message["id"].clone();
-                self.send(json!({"jsonrpc": "2.0", "id": id, "result": {"success": true}}));
+                let result = match message["method"].as_str() {
+                    Some("window/showDocument") => json!({"success": true}),
+                    _ => Value::Null,
+                };
+                self.send(json!({"jsonrpc": "2.0", "id": id, "result": result}));
             }
 
             if predicate(&message) {
@@ -707,6 +711,56 @@ fn chooses_analyses_with_commands() {
 
     let projects = client.command("codesonar.projects", Value::Null);
     assert_eq!(projects, json!([{"id": 1, "name": "test"}]));
+
+    client.shutdown();
+}
+
+#[test]
+fn reports_the_download_progress() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let capabilities = json!({"window": {"workDoneProgress": true}});
+    let mut client =
+        Client::initialize_with(dir.path(), hub_options(dir.path(), &hub), capabilities);
+
+    let create = client.expect("window/workDoneProgress/create", |_| true);
+    let token = create["token"].clone();
+    let progress = |kind: &'static str| {
+        let token = token.clone();
+        move |p: &Value| p["token"] == token && p["value"]["kind"] == kind
+    };
+
+    let begin = client.expect("$/progress", progress("begin"));
+    assert_eq!(begin["value"]["title"], "CodeSonar");
+    assert_eq!(begin["value"]["message"], "Loading the analysis");
+
+    let report = client.expect("$/progress", progress("report"));
+    let message = report["value"]["message"].as_str().unwrap();
+    assert!(message.starts_with("Downloading "), "{message}");
+
+    client.expect("$/progress", progress("end"));
+    client.expect("codesonar/loaded", |_| true);
+
+    client.shutdown();
+}
+
+#[test]
+fn shows_no_progress_without_the_capability() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut client = Client::initialize(dir.path(), hub_options(dir.path(), &hub));
+    client.expect("codesonar/loaded", |_| true);
+
+    assert!(
+        client
+            .pending
+            .iter()
+            .all(|message| message["method"] != "window/workDoneProgress/create"),
+        "{:?}",
+        client.pending
+    );
 
     client.shutdown();
 }

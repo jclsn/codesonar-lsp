@@ -493,6 +493,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reports_the_download_progress() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/analysis/7-allwarnings.sarif"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(FIXTURE))
+            .mount(&server)
+            .await;
+
+        let downloads = std::sync::Mutex::new(Vec::new());
+
+        Hub::new(&config(&server, ""))
+            .unwrap()
+            .sarif("7", |downloaded| downloads.lock().unwrap().push(downloaded))
+            .await
+            .unwrap();
+
+        let downloads = downloads.into_inner().unwrap();
+        let size = Some(FIXTURE.len() as u64);
+
+        assert_eq!(
+            downloads.first(),
+            Some(&Downloaded {
+                received: 0,
+                total: size
+            })
+        );
+        assert_eq!(
+            downloads.last(),
+            Some(&Downloaded {
+                received: FIXTURE.len() as u64,
+                total: size
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn signs_in_with_basic_auth() {
         let server = MockServer::start().await;
 
