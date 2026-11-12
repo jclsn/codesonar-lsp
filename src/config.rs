@@ -39,6 +39,9 @@ pub struct AnalyzeConfig {
     /// Build command, as a list or a string split at whitespace.
     #[serde(deserialize_with = "words")]
     pub build_command: Vec<String>,
+    /// Configuration file with the settings of the workspace, relative to
+    /// its root. Passed with `-conf-file` if it exists.
+    pub conf_file: PathBuf,
     /// Hub project path. Defaults to `/` and the hub project.
     pub project: Option<String>,
     /// CodeSonar presets of analyses, e.g. `misrac2025`.
@@ -53,6 +56,7 @@ impl Default for AnalyzeConfig {
             command: "codesonar".into(),
             project_file: None,
             build_command: vec!["make".into(), "-B".into()],
+            conf_file: "codesonar.conf".into(),
             project: None,
             presets: Vec::new(),
             args: Vec::new(),

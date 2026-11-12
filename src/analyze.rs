@@ -85,8 +85,15 @@ pub fn command(
         command.extend(["-preset".into(), preset.clone()]);
     }
 
+    let workspace_conf = workspace_conf(config, root);
+
+    if let Some(conf) = &workspace_conf {
+        command.extend(["-conf-file".into(), path(conf)]);
+    }
+
     command.extend(analyze.args.iter().cloned());
     command.push(hub.url.clone());
+
     command.extend(analyze.build_command.iter().cloned());
 
     Ok(AnalyzeCommand {
@@ -105,6 +112,12 @@ pub fn prefix(config: &Config, root: &Path, local: Option<&LocalProject>) -> Pat
         (None, Some(local)) => local.prefix.clone(),
         (None, None) => root.join(DEFAULT_PREFIX),
     }
+}
+
+/// The configuration file of the workspace, if it exists.
+pub fn workspace_conf(config: &Config, root: &Path) -> Option<PathBuf> {
+    let conf = root.join(expand_home(&config.analyze.conf_file));
+    conf.is_file().then_some(conf)
 }
 
 /// The configuration file of the project.

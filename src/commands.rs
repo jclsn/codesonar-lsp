@@ -36,8 +36,10 @@ pub const WARNINGS: &str = "codesonar.warnings";
 /// optional. Returns `{command, cwd, temporaryFiles}`.
 pub const ANALYZE_COMMAND: &str = "codesonar.analyzeCommand";
 /// Returns the CodeSonar project of the workspace: `{prefix, conf,
-/// confExists, created}`. With `{createConf: true}`, the configuration file
-/// is created from CodeSonar's template if it does not exist.
+/// confExists, created, workspaceConf}`. With `{createConf:
+/// true}`, the configuration file is created from CodeSonar's template if
+/// it does not exist. `workspaceConf` is the configuration file of the
+/// workspace, if it exists.
 pub const PROJECT: &str = "codesonar.project";
 
 /// Returns the presets of the CodeSonar installation: `[{name,

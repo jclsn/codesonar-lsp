@@ -776,11 +776,13 @@ impl Backend {
         let prefix = state.prefix(root);
         let created = args.create_conf && analyze::create_conf(&state.config, &prefix)?;
         let conf = analyze::conf_file(&prefix);
+        let workspace_conf = analyze::workspace_conf(&state.config, root);
         Ok(json!({
             "prefix": prefix,
             "confExists": conf.exists(),
             "conf": conf,
             "created": created,
+            "workspaceConf": workspace_conf,
         }))
     }
 

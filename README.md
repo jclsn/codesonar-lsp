@@ -90,6 +90,7 @@ the `analyze` settings keep the shown analysis.
 | `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
 | `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Detected if not set, else `.codesonar/project`. |
 | `analyze.buildCommand`   | Build command, a string or a list. Default: `make -B`.          |
+| `analyze.confFile`       | Configuration file of the workspace, relative to its root, passed with `-conf-file` if it exists. Default: `codesonar.conf`. |
 | `analyze.project`        | Hub project path. Default: `/` and `hub.project`.               |
 | `analyze.presets`        | CodeSonar presets of analyses, e.g. `["misrac2025", "cert"]`. |
 | `analyze.args`           | Further arguments of `codesonar analyze`.                       |
@@ -128,7 +129,7 @@ argument, an object.
 | `codesonar.status`          |                                                  | `{loaded, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
-| `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created}`: the project files; `createConf` creates the configuration file from CodeSonar's template |
+| `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, workspaceConf}`: the project files; `createConf` creates the configuration file from CodeSonar's template. `workspaceConf` is the configuration file of the workspace, if it exists |
 | `codesonar.presets`         |                                                  | `[{name, description, selected}]`: the presets of the CodeSonar installation |
 | `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |
