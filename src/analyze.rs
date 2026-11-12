@@ -312,6 +312,30 @@ mod tests {
     }
 
     #[test]
+    fn passes_the_workspace_configuration() {
+        let config = config(json!({"url": "http://hub"}));
+        let root = tempfile::tempdir().unwrap();
+
+        assert!(
+            !run(&config, root.path(), None)
+                .unwrap()
+                .command
+                .contains(&"-conf-file".into())
+        );
+
+        let conf = root.path().join("codesonar.conf");
+        std::fs::write(&conf, "WARNING_FILTER += discard path:/build/\n").unwrap();
+        let command = run(&config, root.path(), None).unwrap().command;
+
+        let at = command
+            .iter()
+            .position(|part| part == "-conf-file")
+            .unwrap();
+
+        assert_eq!(command[at + 1], conf.display().to_string());
+    }
+
+    #[test]
     fn writes_temporary_password_file() {
         let config = config(json!({"url": "http://hub", "username": "alice", "password": "pw"}));
         let root = tempfile::tempdir().unwrap();

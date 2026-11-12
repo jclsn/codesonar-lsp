@@ -331,6 +331,7 @@ mod tests {
             ["cmake", "--build", "out dir"]
         );
         assert_eq!(config.analyze.command, "codesonar", "defaults kept");
+        assert_eq!(config.analyze.conf_file, Path::new("codesonar.conf"));
         assert!(Config::from_value(&json!({"changed": "sometimes"})).is_err());
     }
 
