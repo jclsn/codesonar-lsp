@@ -58,6 +58,9 @@ struct State {
     /// The loaded analysis and how it was chosen.
     analysis: Option<Analysis>,
     selection: Option<Selection>,
+    /// Whether the analysis was hidden on request: then none is loaded
+    /// until one is chosen.
+    hidden: bool,
     /// The shown warnings in the current code.
     store: Store,
     documents: HashMap<Url, Document>,
@@ -139,6 +142,7 @@ impl State {
         // How analyses are run, also before one is loaded.
         let mut status = json!({
             "loaded": false,
+            "hidden": self.hidden,
             "hub": hub.map(|hub| &hub.url),
             "project": hub.and_then(|hub| hub.project.as_ref()),
             "presets": self.config.analyze.presets,
@@ -248,7 +252,14 @@ impl Backend {
     /// Loads the analysis shown before, else the configured one, and
     /// reports errors.
     async fn reload(&self) {
-        let selection = self.state.read().await.selection.clone();
+        let (selection, hidden) = {
+            let state = self.state.read().await;
+            (state.selection.clone(), state.hidden)
+        };
+
+        if hidden {
+            return;
+        }
 
         if let Err(error) = self.load(selection.unwrap_or(Selection::Configured)).await {
             self.error(format!("{error:#}")).await;
@@ -309,6 +320,7 @@ impl Backend {
 
             state.analysis = Some(analysis);
             state.selection = Some(selection);
+            state.hidden = false;
             state.store = Store::default();
 
             for uri in &uris {
@@ -708,6 +720,15 @@ impl Backend {
             )
             .await;
 
+        // A hidden analysis that is gone cannot be shown again.
+        {
+            let mut state = self.state.write().await;
+
+            if state.hidden && state.selection == Some(Selection::Hub(id.to_string())) {
+                state.selection = None;
+            }
+        }
+
         // Loading the next analysis can take a minute, the client should not
         // wait for it.
         if shown == Some(id.to_string()) {
@@ -725,13 +746,15 @@ impl Backend {
         Ok(value)
     }
 
-    /// Hides the shown analysis and its warnings.
+    /// Hides the shown analysis and its warnings until another one is
+    /// loaded. The choice of the analysis is kept, so it can be shown
+    /// again.
     async fn unload(&self) {
         let uris = {
             let mut state = self.state.write().await;
             let uris: Vec<Url> = state.store.files().map(|(uri, _)| uri.clone()).collect();
             state.analysis = None;
-            state.selection = None;
+            state.hidden = true;
             state.store = Store::default();
             uris
         };
@@ -740,6 +763,23 @@ impl Backend {
         self.client
             .send_notification::<commands::Loaded>(status)
             .await;
+    }
+
+    /// Hides the shown analysis, or shows the hidden one again.
+    async fn toggle(&self) -> anyhow::Result<Value> {
+        let (hidden, selection) = {
+            let state = self.state.read().await;
+            (state.hidden, state.selection.clone())
+        };
+
+        if hidden {
+            self.load(selection.unwrap_or(Selection::Configured))
+                .await?;
+        } else {
+            self.unload().await;
+        }
+
+        Ok(self.state.read().await.status())
     }
 
     async fn load_command(&self, args: LoadArgs) -> anyhow::Result<Value> {
@@ -1083,6 +1123,11 @@ impl LanguageServer for Backend {
             commands::ANALYSES => self.analyses().await,
             commands::DELETE_ANALYSIS => self.delete_analysis(required(arguments)?).await,
             commands::LOAD => self.load_command(parse(arguments)?).await,
+            commands::HIDE => {
+                self.unload().await;
+                Ok(self.state.read().await.status())
+            }
+            commands::TOGGLE => self.toggle().await,
             commands::EXPLAIN_COMMAND => Ok(self.explain(required(arguments)?).await),
             commands::STATUS => Ok(self.state.read().await.status()),
             commands::WARNINGS => Ok(self.state.read().await.warnings()),

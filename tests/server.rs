@@ -1053,7 +1053,7 @@ fn reports_the_hub_and_presets_in_the_status() {
 
     assert_eq!(
         client.command("codesonar.status", Value::Null),
-        json!({"loaded": false, "hub": null, "project": null, "presets": []})
+        json!({"loaded": false, "hidden": false, "hub": null, "project": null, "presets": []})
     );
     client.shutdown();
 }

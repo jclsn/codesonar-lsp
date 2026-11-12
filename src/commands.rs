@@ -27,6 +27,12 @@ pub const DELETE_ANALYSIS: &str = "codesonar.deleteAnalysis";
 /// Loads an analysis: `{analysis: id}`, `{file: path}`, `{latest: true}`
 /// or nothing for the configured one. Returns the status.
 pub const LOAD: &str = "codesonar.load";
+/// Hides the shown analysis and its warnings, until an analysis is loaded
+/// with [`LOAD`]. Returns the status.
+pub const HIDE: &str = "codesonar.hide";
+/// Hides the shown analysis like [`HIDE`], or shows the hidden one again.
+/// Returns the status.
+pub const TOGGLE: &str = "codesonar.toggle";
 /// Returns the status of the loaded analysis, see [`LOADED`].
 pub const STATUS: &str = "codesonar.status";
 /// Returns the shown warnings: `[{uri, range, severity, code, message,
@@ -46,7 +52,7 @@ pub const PROJECT: &str = "codesonar.project";
 /// description, selected}]`. The setting `analyze.presets` selects them.
 pub const PRESETS: &str = "codesonar.presets";
 
-pub const ALL: [&str; 13] = [
+pub const ALL: [&str; 15] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
@@ -55,6 +61,8 @@ pub const ALL: [&str; 13] = [
     ANALYSES,
     DELETE_ANALYSIS,
     LOAD,
+    HIDE,
+    TOGGLE,
     STATUS,
     WARNINGS,
     ANALYZE_COMMAND,
@@ -64,8 +72,9 @@ pub const ALL: [&str; 13] = [
 
 /// Sent after an analysis was loaded and once more after the analyzed
 /// code was read from the hub, with the status:
-/// `{loaded, hub, project, presets, name, key, hubId, url, total, shown,
-/// counts}`. Without a loaded analysis, only the first four are set.
+/// `{loaded, hidden, hub, project, presets, name, key, hubId, url, total,
+/// shown, counts}`. Without a loaded analysis, only the first five are
+/// set. `hidden` tells whether the analysis was hidden with [`HIDE`].
 pub enum Loaded {}
 
 impl Notification for Loaded {

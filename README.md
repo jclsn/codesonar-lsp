@@ -119,7 +119,8 @@ argument, an object.
 | `codesonar.analyses`        |                                                  | `{project, analyses: [{id, name, started, state, finished, current}]}` |
 | `codesonar.deleteAnalysis`  | `{analysis}`                                     | Deletes the analysis from the hub and returns the analyses like `codesonar.analyses`, with `deleted` and the reason in `message` if the hub refused, e.g. without permission. If it was shown, the newest finished one is loaded afterwards |
 | `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
-| `codesonar.status`          |                                                  | `{loaded, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
+| `codesonar.hide`            |                                                  | Hides the shown analysis and its warnings until one is loaded with `codesonar.load`. Returns the status |
+| `codesonar.status`          |                                                  | `{loaded, hidden, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
 | `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, incremental, workspaceConf}`: the project files; `createConf` creates the configuration file from CodeSonar's template. `workspaceConf` is the configuration file of the workspace, if it exists |
