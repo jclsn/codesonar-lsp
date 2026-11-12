@@ -368,6 +368,72 @@ fn refresh_clears_fixed_warnings() {
 }
 
 #[test]
+fn hides_the_analysis_until_one_is_loaded() {
+    let dir = workspace();
+    let mut client = Client::initialize(dir.path(), options(dir.path()));
+    let main = uri(dir.path().join("src/main.c"));
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] != json!([])
+    });
+
+    let status = client.command("codesonar.hide", Value::Null);
+    assert_eq!(status["loaded"], false);
+    assert_eq!(status["hidden"], true);
+
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] == json!([])
+    });
+    client.expect("codesonar/loaded", |p| p["loaded"] == false);
+
+    // Neither a refresh nor new settings show it again.
+    client.pending.clear();
+    client.command("codesonar.refresh", Value::Null);
+
+    let mut settings = options(dir.path());
+    settings["changed"] = json!("mark");
+    client.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings": {"codesonar": settings}}),
+    );
+
+    // The server handles messages concurrently, so a reload may finish later.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    client.pending.extend(client.messages.try_iter());
+
+    assert!(
+        !client
+            .pending
+            .iter()
+            .any(|message| message["params"]["loaded"] == true),
+        "not loaded again"
+    );
+    assert_eq!(
+        client.command("codesonar.status", Value::Null)["loaded"],
+        false
+    );
+
+    // Toggled, it is shown again.
+    let status = client.command("codesonar.toggle", Value::Null);
+    assert_eq!(status["loaded"], true);
+    assert_eq!(status["hidden"], false);
+
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] != json!([])
+    });
+
+    // Toggled again, it is hidden.
+    let status = client.command("codesonar.toggle", Value::Null);
+    assert_eq!(status["loaded"], false);
+    assert_eq!(status["hidden"], true);
+
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] == json!([])
+    });
+
+    client.shutdown();
+}
+
+#[test]
 fn reports_invalid_source_after_configuration_change() {
     let dir = workspace();
     let mut client = Client::initialize(dir.path(), options(dir.path()));
