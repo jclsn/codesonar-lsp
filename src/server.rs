@@ -34,12 +34,15 @@ const WATCH_PATTERN: &str = "**/*.sarif";
 /// How often the download progress is reported at most.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
+/// The server. Clones share the state, so they can work in background
+/// tasks.
+#[derive(Clone)]
 pub struct Backend {
     client: Client,
-    state: RwLock<State>,
-    reload_lock: Mutex<()>,
+    state: Arc<RwLock<State>>,
+    reload_lock: Arc<Mutex<()>>,
     /// The rules of warnings, by their hub URL.
-    rules: Mutex<HashMap<Url, Vec<Rule>>>,
+    rules: Arc<Mutex<HashMap<Url, Vec<Rule>>>>,
 }
 
 struct Document {
@@ -230,9 +233,9 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            state: RwLock::default(),
-            reload_lock: Mutex::default(),
-            rules: Mutex::default(),
+            state: Arc::default(),
+            reload_lock: Arc::default(),
+            rules: Arc::default(),
         }
     }
 
