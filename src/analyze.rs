@@ -348,6 +348,15 @@ mod tests {
         assert!(command.temporary_files.is_empty());
     }
 
+    fn build(root: &Path, config: &Config) -> Vec<String> {
+        let command = run(config, root, None).unwrap().command;
+        let url = command
+            .iter()
+            .position(|part| part == "http://hub")
+            .unwrap();
+        command[url + 1..].to_vec()
+    }
+
     #[test]
     fn passes_the_workspace_configuration() {
         let config = config(json!({"url": "http://hub"}));
@@ -370,6 +379,54 @@ mod tests {
             .unwrap();
 
         assert_eq!(command[at + 1], conf.display().to_string());
+    }
+
+    #[test]
+    fn builds_incrementally_after_an_analysis() {
+        let mut config = config(json!({"url": "http://hub"}));
+        config.analyze.build_command = vec!["make".into(), "-B".into()];
+        config.analyze.incremental_build_command = vec!["make".into(), "-j4".into()];
+        let root = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            build(root.path(), &config),
+            ["make", "-B"],
+            "the first analysis"
+        );
+
+        let files = root.path().join(".codesonar/project.prj_files");
+        std::fs::create_dir_all(&files).unwrap();
+        std::fs::write(files.join("aid.txt"), "20\n").unwrap();
+
+        assert_eq!(
+            build(root.path(), &config),
+            ["make", "-j4"],
+            "incremental by default"
+        );
+
+        // The workspace configuration wins over the project's, commented
+        // settings do not count.
+        std::fs::write(
+            root.path().join(".codesonar/project.conf"),
+            "INCREMENTAL_BUILD = Yes\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            root.path().join("codesonar.conf"),
+            "INCREMENTAL_BUILD = No\n#INCREMENTAL_BUILD = Yes\n",
+        )
+        .unwrap();
+
+        assert_eq!(build(root.path(), &config), ["make", "-B"]);
+
+        std::fs::write(
+            root.path().join("codesonar.conf"),
+            "INCREMENTAL_BUILD=yes\n",
+        )
+        .unwrap();
+
+        assert_eq!(build(root.path(), &config), ["make", "-j4"]);
     }
 
     #[test]

@@ -337,7 +337,16 @@ mod tests {
             ["cmake", "--build", "out dir"]
         );
         assert_eq!(config.analyze.command, "codesonar", "defaults kept");
+        assert_eq!(config.analyze.incremental_build_command, ["make"]);
         assert_eq!(config.analyze.conf_file, Path::new("codesonar.conf"));
+
+        let value = json!({"analyze": {"incrementalBuildCommand": "ninja -C build"}});
+        let config = Config::from_value(&value).unwrap();
+
+        assert_eq!(
+            config.analyze.incremental_build_command,
+            ["ninja", "-C", "build"]
+        );
         assert!(Config::from_value(&json!({"changed": "sometimes"})).is_err());
     }
 
