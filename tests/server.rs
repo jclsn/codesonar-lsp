@@ -1309,6 +1309,55 @@ fn reads_the_workspace_configuration() {
 }
 
 #[test]
+fn configures_the_analysis_in_the_workspace_configuration() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let (dir, conf, options) = configured_workspace(&hub);
+    let mut client = Client::initialize(dir.path(), options);
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    let options = client.command("codesonar.analysisOptions", Value::Null);
+    assert_eq!(
+        options["presets"],
+        json!([{"name": "security", "description": "Security", "selected": true}])
+    );
+    assert_eq!(options["checks"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        options["checks"][2],
+        json!({"class": "Function Too Long", "language": "C and C++", "default": false, "enabled": false})
+    );
+
+    let options = client.command(
+        "codesonar.configureAnalysis",
+        json!({"presets": [], "checks": [
+            {"class": "Function Too Long", "enabled": true},
+            {"class": "Buffer Overrun", "enabled": true},
+        ]}),
+    );
+
+    assert_eq!(options["checks"][2]["enabled"], true);
+
+    let text = std::fs::read_to_string(&conf).unwrap();
+    assert!(text.contains("# codesonar-lsp: presets = \n"), "{text}");
+    assert!(text.contains("WARNING_FILTER += allow class=\"Function Too Long\"\n"));
+    assert!(
+        !text.contains("Buffer Overrun"),
+        "the default needs no rule"
+    );
+    assert!(
+        text.contains(&format!("HUB_ADDRESS = {}\n", hub_address(&hub))),
+        "kept"
+    );
+
+    assert_eq!(
+        client.command("codesonar.status", Value::Null)["presets"],
+        json!([])
+    );
+
+    client.shutdown();
+}
+
+#[test]
 fn lists_presets() {
     let dir = workspace();
     let install = dir.path().join("install");

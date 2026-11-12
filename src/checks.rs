@@ -64,3 +64,28 @@ fn listed_class(line: &str, default: bool) -> Option<String> {
         .strip_suffix('"')?;
     Some(class.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEMPLATE: &str = include_str!("../tests/fixtures/template_checks.conf");
+
+    #[test]
+    fn lists_the_checks_of_the_languages() {
+        let check = |class: &str, default| Check {
+            class: class.into(),
+            language: "C and C++".into(),
+            default,
+        };
+        assert_eq!(
+            checks(TEMPLATE, &LANGUAGES),
+            [
+                check("Buffer Overrun", true),
+                check("Null Pointer Dereference", true),
+                check("Function Too Long", false),
+            ]
+        );
+        assert_eq!(checks(TEMPLATE, &["Java"]).len(), 2);
+    }
+}
