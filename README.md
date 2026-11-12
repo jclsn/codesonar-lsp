@@ -79,6 +79,8 @@ the `analyze` settings keep the shown analysis.
 | `pathMappings`           | Maps paths from the analysis machine to local paths.            |
 | `changed`                | Warnings in code changed since the analysis: `hide` or `mark` them as hints. |
 | `stateDir`               | Where the analyzed code is remembered. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
+| `cacheDir`               | Where downloaded analyses are kept. Default: `$XDG_CACHE_HOME/codesonar-lsp`. |
+| `cachedAnalyses`         | How many finished analyses of each hub project are kept downloaded, the most recently shown ones. `0` turns the cache off. Default: `10`. |
 | `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
 | `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Detected if not set, else `.codesonar/project`. |
 | `analyze.buildCommand`   | Build command, a string or a list. It must build everything, since CodeSonar only sees what is compiled. Default: `make -B`. |
@@ -116,8 +118,9 @@ argument, an object.
 | --------------------------- | ------------------------------------------------ | ------ |
 | `codesonar.connect`         | `{url, username, password, project}`, all optional | The hub projects; with `project`, its newest analysis is shown |
 | `codesonar.projects`        |                                                  | `[{id, name}]` |
-| `codesonar.analyses`        |                                                  | `{project, analyses: [{id, name, started, state, finished, current}]}` |
+| `codesonar.analyses`        |                                                  | `{project, analyses: [{id, name, started, state, finished, current, cached}]}` |
 | `codesonar.deleteAnalysis`  | `{analysis}`                                     | Deletes the analysis from the hub and returns the analyses like `codesonar.analyses`, with `deleted` and the reason in `message` if the hub refused, e.g. without permission. If it was shown, the newest finished one is loaded afterwards |
+| `codesonar.uncache`         | `{analysis}`                                     | Removes the analysis from the cache of downloaded analyses and returns the analyses like `codesonar.analyses` |
 | `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
 | `codesonar.hide`            |                                                  | Hides the shown analysis and its warnings until one is loaded with `codesonar.load`. Returns the status |
 | `codesonar.status`          |                                                  | `{loaded, hidden, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
@@ -134,7 +137,8 @@ When an analysis starts loading, the server sends the notification
 analyses take a minute, because the hub creates the SARIF export while
 sending it. If the client supports `window.workDoneProgress`, the server
 reports the download as work done progress, e.g. `Downloading 4.2 MB`.
-After an analysis was shown, it sends `codesonar/loaded` with the status.
+Finished analyses are kept downloaded (`cachedAnalyses`), so they show up
+quickly the next time. After an analysis was shown, it sends `codesonar/loaded` with the status.
 
 ## Editors
 

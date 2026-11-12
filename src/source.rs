@@ -5,8 +5,9 @@ use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, bail};
 
+use crate::cache::Cache;
 use crate::config::Config;
-use crate::hub::{Downloaded, Hub};
+use crate::hub::{Analysis, Downloaded, Hub};
 use crate::sarif::Log;
 
 /// Which analysis to load.
@@ -62,7 +63,7 @@ pub async fn load(
                 bail!("no finished analysis in hub project {project}");
             };
             let id = latest.id.to_string();
-            load_hub(hub, config, &id, Some(latest.name), progress)
+            load_hub(hub, config, &id, Some(latest), progress)
                 .await
                 .map(Some)
         }
@@ -88,29 +89,59 @@ async fn load_hub(
     hub: &Hub,
     config: &Config,
     id: &str,
-    name: Option<String>,
+    analysis: Option<Analysis>,
     progress: impl Fn(Downloaded),
 ) -> anyhow::Result<Loaded> {
-    let log = hub.sarif(id, progress).await?;
     let project = config.hub.as_ref().and_then(|hub| hub.project.as_ref());
-    let name = match (name, project) {
-        (Some(name), _) => Some(name),
-        // The name only makes the analysis easier to recognize.
+    // The name makes the analysis easier to recognize, and only finished
+    // analyses are cached.
+    let analysis = match (analysis, project) {
+        (Some(analysis), _) => Some(analysis),
         (None, Some(project)) => hub.analyses(project).await.ok().and_then(|analyses| {
             analyses
                 .into_iter()
                 .find(|analysis| analysis.id.to_string() == id)
-                .map(|analysis| analysis.name)
         }),
         (None, None) => None,
+    };
+    let cache = Cache::of(config).filter(|_| analysis.as_ref().is_some_and(Analysis::is_finished));
+    let log = match cached(cache.as_ref(), id) {
+        Some(log) => log,
+        None => {
+            let text = hub.sarif_text(id, progress).await?;
+            let log =
+                Log::from_json(&text).with_context(|| format!("invalid SARIF of analysis {id}"))?;
+
+            if let Some(cache) = &cache {
+                // The analysis is shown anyway, only the next time takes long.
+                let _ = cache.put(id, &text);
+            }
+
+            log
+        }
     };
     let url = hub.config().url.trim_end_matches('/');
     Ok(Loaded {
         log,
         key: format!("hub:{url}#{id}"),
-        name: name.unwrap_or_else(|| format!("analysis {id}")),
+        name: analysis
+            .map(|analysis| analysis.name)
+            .unwrap_or_else(|| format!("analysis {id}")),
         hub_id: Some(id.to_string()),
     })
+}
+
+/// The cached SARIF log of an analysis. Invalid ones are dropped, so that
+/// they are downloaded again.
+fn cached(cache: Option<&Cache>, id: &str) -> Option<Log> {
+    let cache = cache?;
+    let log = Log::from_json(&cache.get(id)?).ok();
+
+    if log.is_none() {
+        let _ = cache.remove(id);
+    }
+
+    log
 }
 
 async fn load_file(file: &Path, root: Option<&Path>) -> anyhow::Result<Loaded> {

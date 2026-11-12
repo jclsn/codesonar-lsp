@@ -14,6 +14,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::{self, Analysis};
 use crate::analyze;
+use crate::cache::Cache;
 use crate::code_action;
 use crate::commands::{
     self, AnalyzeArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND,
@@ -673,10 +674,14 @@ impl Backend {
     }
 
     async fn analyses(&self) -> anyhow::Result<Value> {
-        let (hub, current) = {
+        let (hub, current, cache) = {
             let state = self.state.read().await;
             let current = state.analysis.as_ref().and_then(|a| a.hub_id.clone());
-            (Self::hub(&state)?, current)
+            (
+                Self::hub(&state)?,
+                current,
+                Cache::of(&state.effective_config()),
+            )
         };
         let project = self
             .state
@@ -692,7 +697,9 @@ impl Backend {
             .map(|analysis| {
                 let mut value = json!(analysis);
                 value["finished"] = json!(analysis.is_finished());
-                value["current"] = json!(current.as_deref() == Some(&analysis.id.to_string()));
+                let id = analysis.id.to_string();
+                value["current"] = json!(current.as_deref() == Some(&id));
+                value["cached"] = json!(cache.as_ref().is_some_and(|cache| cache.contains(&id)));
                 value
             })
             .collect();
@@ -719,6 +726,7 @@ impl Backend {
                 format!("CodeSonar: deleted analysis {id}"),
             )
             .await;
+        self.uncache(id).await?;
 
         // A hidden analysis that is gone cannot be shown again.
         {
@@ -744,6 +752,17 @@ impl Backend {
         let mut value = self.analyses().await?;
         value["deleted"] = json!(true);
         Ok(value)
+    }
+
+    /// Removes an analysis from the cache of downloaded analyses.
+    async fn uncache(&self, id: u64) -> anyhow::Result<()> {
+        let cache = Cache::of(&self.state.read().await.effective_config());
+
+        if let Some(cache) = cache {
+            cache.remove(&id.to_string())?;
+        }
+
+        Ok(())
     }
 
     /// Hides the shown analysis and its warnings until another one is
@@ -1123,6 +1142,14 @@ impl LanguageServer for Backend {
             commands::ANALYSES => self.analyses().await,
             commands::DELETE_ANALYSIS => self.delete_analysis(required(arguments)?).await,
             commands::LOAD => self.load_command(parse(arguments)?).await,
+            commands::UNCACHE => {
+                let args: DeleteAnalysisArgs = required(arguments)?;
+
+                match self.uncache(args.analysis).await {
+                    Ok(()) => self.analyses().await,
+                    Err(error) => Err(error),
+                }
+            }
             commands::HIDE => {
                 self.unload().await;
                 Ok(self.state.read().await.status())

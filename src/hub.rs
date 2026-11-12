@@ -107,6 +107,18 @@ impl Hub {
         analysis_id: &str,
         progress: impl Fn(Downloaded),
     ) -> anyhow::Result<Log> {
+        let text = self.sarif_text(analysis_id, progress).await?;
+        Log::from_json(&text)
+            .with_context(|| format!("invalid SARIF from {}", self.config.sarif_path(analysis_id)))
+    }
+
+    /// Downloads the SARIF export of an analysis as it is, see
+    /// [`Hub::sarif`].
+    pub async fn sarif_text(
+        &self,
+        analysis_id: &str,
+        progress: impl Fn(Downloaded),
+    ) -> anyhow::Result<String> {
         let path = self.config.sarif_path(analysis_id);
         let mut response = self.response(&path).await?;
         let mut downloaded = Downloaded {
@@ -126,8 +138,7 @@ impl Hub {
             progress(downloaded);
         }
 
-        let text = String::from_utf8(body).with_context(|| format!("invalid SARIF from {path}"))?;
-        Log::from_json(&text).with_context(|| format!("invalid SARIF from {path}"))
+        String::from_utf8(body).with_context(|| format!("invalid SARIF from {path}"))
     }
 
     pub async fn projects(&self) -> anyhow::Result<Vec<Project>> {

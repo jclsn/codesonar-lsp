@@ -24,6 +24,11 @@ pub struct Config {
     pub changed: Changed,
     /// Directory of the memory of analyzed code.
     pub state_dir: Option<PathBuf>,
+    /// Directory of the downloaded SARIF exports of hub analyses.
+    pub cache_dir: Option<PathBuf>,
+    /// How many analyses of each hub project are kept downloaded, see
+    /// [`crate::cache::DEFAULT_SIZE`]. 0 turns the cache off.
+    pub cached_analyses: Option<usize>,
     /// How to run an analysis.
     pub analyze: AnalyzeConfig,
 }

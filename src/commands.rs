@@ -16,7 +16,9 @@ pub const CONNECT: &str = "codesonar.connect";
 /// Returns the hub projects: `[{id, name}]`.
 pub const PROJECTS: &str = "codesonar.projects";
 /// Returns the analyses of the hub project, newest first:
-/// `{project, analyses: [{id, name, started, state, finished, current}]}`.
+/// `{project, analyses: [{id, name, started, state, finished, current,
+/// cached}]}`. Cached analyses were downloaded before, so they show up
+/// quickly.
 pub const ANALYSES: &str = "codesonar.analyses";
 /// Deletes an analysis from the hub: `{analysis: id}`. Returns the
 /// analyses like [`ANALYSES`] with `deleted`, and the reason in `message`
@@ -24,6 +26,9 @@ pub const ANALYSES: &str = "codesonar.analyses";
 /// deleted, the newest finished one is loaded afterwards, or none is shown
 /// without one.
 pub const DELETE_ANALYSIS: &str = "codesonar.deleteAnalysis";
+/// Removes an analysis from the cache of downloaded analyses:
+/// `{analysis: id}`. Returns the analyses like [`ANALYSES`].
+pub const UNCACHE: &str = "codesonar.uncache";
 /// Loads an analysis: `{analysis: id}`, `{file: path}`, `{latest: true}`
 /// or nothing for the configured one. Returns the status.
 pub const LOAD: &str = "codesonar.load";
@@ -52,7 +57,7 @@ pub const PROJECT: &str = "codesonar.project";
 /// description, selected}]`. The setting `analyze.presets` selects them.
 pub const PRESETS: &str = "codesonar.presets";
 
-pub const ALL: [&str; 15] = [
+pub const ALL: [&str; 16] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
@@ -60,6 +65,7 @@ pub const ALL: [&str; 15] = [
     PROJECTS,
     ANALYSES,
     DELETE_ANALYSIS,
+    UNCACHE,
     LOAD,
     HIDE,
     TOGGLE,

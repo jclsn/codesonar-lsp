@@ -25,10 +25,11 @@ struct Client {
 
 impl Client {
     fn start() -> Self {
-        // Keeps the memory of the tests away from the user's.
+        // Keeps the memory and the cache of the tests away from the user's.
         let state = tempfile::tempdir().unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_codesonar-lsp"))
             .env("XDG_STATE_HOME", state.path())
+            .env("XDG_CACHE_HOME", state.path().join("cache"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod analyze;
+pub mod cache;
 pub mod code_action;
 pub mod commands;
 pub mod config;
