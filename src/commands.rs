@@ -63,11 +63,20 @@ pub const PROJECT: &str = "codesonar.project";
 /// Returns the project like [`PROJECT`].
 pub const INIT_CONF: &str = "codesonar.initConf";
 
+/// Returns the presets and checks that analyses can use: `{conf, presets:
+/// [{name, description, selected}], checks: [{class, language, default,
+/// enabled}]}`. Both come from the CodeSonar installation, the choice from
+/// the workspace configuration `conf`.
+pub const ANALYSIS_OPTIONS: &str = "codesonar.analysisOptions";
+/// Writes presets and checks into the section of codesonar-lsp in the
+/// workspace configuration: `{presets: [name], checks: [{class, enabled}]}`,
+/// both optional. Returns the options like [`ANALYSIS_OPTIONS`].
+pub const CONFIGURE_ANALYSIS: &str = "codesonar.configureAnalysis";
 /// Returns the presets of the CodeSonar installation: `[{name,
 /// description, selected}]`. The setting `analyze.presets` selects them.
 pub const PRESETS: &str = "codesonar.presets";
 
-pub const ALL: [&str; 17] = [
+pub const ALL: [&str; 19] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
@@ -85,6 +94,8 @@ pub const ALL: [&str; 17] = [
     PROJECT,
     INIT_CONF,
     PRESETS,
+    ANALYSIS_OPTIONS,
+    CONFIGURE_ANALYSIS,
 ];
 
 /// Sent after an analysis was loaded and once more after the analyzed
@@ -108,6 +119,19 @@ pub enum Loading {}
 impl Notification for Loading {
     type Params = Value;
     const METHOD: &'static str = "codesonar/loading";
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ConfigureAnalysisArgs {
+    pub presets: Option<Vec<String>>,
+    pub checks: Vec<CheckChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CheckChoice {
+    pub class: String,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]

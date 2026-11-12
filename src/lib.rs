@@ -3,6 +3,7 @@
 pub mod analysis;
 pub mod analyze;
 pub mod cache;
+pub mod checks;
 pub mod code_action;
 pub mod commands;
 pub mod config;

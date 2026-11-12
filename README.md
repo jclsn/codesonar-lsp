@@ -101,7 +101,7 @@ the server reads it from `codesonar.conf` in the workspace root
 CodeSonar's own settings stay as they are, e.g. `HUB_ADDRESS` names the
 hub. CodeSonar has no settings for the hub project, the presets and the
 build command, so the server keeps them in comments of a section that it
-writes, e.g. for `codesonar.connect`:
+writes, e.g. for `codesonar.configureAnalysis` or `codesonar.connect`:
 
 ```
 # BEGIN codesonar-lsp: written by codesonar-lsp, e.g. :CodeSonarPresets
@@ -123,8 +123,11 @@ ones are incremental and take the rest from their parent.
 The section wins over the editor settings: `HUB_ADDRESS` over `hub.url`
 (keeping its scheme and credentials), `project` over `hub.project` and
 `analyze.project`, `presets`, `build` and `incremental-build` over the
-`analyze` settings. So the editor settings only need the credentials. Lines
-edited by hand in the section are kept, everything outside it is left alone.
+`analyze` settings. So the editor settings only need the credentials. The
+checks are rules for the warning classes that differ from CodeSonar's
+default; the presets and checks on offer come from the CodeSonar
+installation (`codesonar.analysisOptions`). Lines edited by hand in the
+section are kept, everything outside it is left alone.
 
 ## How the project is detected
 
@@ -163,6 +166,8 @@ argument, an object.
 | `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, incremental, workspaceConf, workspaceConfExists, section, suggested: {project, build, hubAddress}}`: the project files and the workspace configuration; `createConf` creates the configuration file of the project from CodeSonar's template, `section` tells whether the workspace configuration has the section of the server |
 | `codesonar.initConf`        | `{project, build, hubAddress}`                   | Starts the workspace configuration with them and returns the project |
 | `codesonar.presets`         |                                                  | `[{name, description, selected}]`: the presets of the CodeSonar installation |
+| `codesonar.analysisOptions` |                                                  | `{conf, presets: [{name, description, selected}], checks: [{class, language, default, enabled}]}`: the presets and checks of the CodeSonar installation, as the workspace configuration chooses them |
+| `codesonar.configureAnalysis` | `{presets: [name], checks: [{class, enabled}]}`, both optional | Writes them into the workspace configuration and returns the options |
 | `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |
 | `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |

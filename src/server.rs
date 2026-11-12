@@ -15,10 +15,11 @@ use tower_lsp::{Client, LanguageServer};
 use crate::analysis::{self, Analysis};
 use crate::analyze;
 use crate::cache::Cache;
+use crate::checks;
 use crate::code_action;
 use crate::commands::{
-    self, AnalyzeArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs, InitConfArgs, LoadArgs,
-    OPEN_IN_HUB_COMMAND, ProjectArgs, REFRESH_COMMAND,
+    self, AnalyzeArgs, ConfigureAnalysisArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs,
+    InitConfArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs, REFRESH_COMMAND,
 };
 use crate::config::{Config, HubConfig, expand_home};
 use crate::detect::{self, LocalProject};
@@ -30,7 +31,7 @@ use crate::source::{self, Loaded, Selection};
 use crate::store::Store;
 use crate::tracking::Anchor;
 use crate::warning::{self, Rule, Warning};
-use crate::workspace::WorkspaceConf;
+use crate::workspace::{CheckRule, WorkspaceConf};
 
 const WATCH_PATTERN: &str = "**/*.sarif";
 /// How often the download progress is reported at most.
@@ -818,6 +819,89 @@ impl Backend {
         }
     }
 
+    /// The presets and checks that analyses can use, as the workspace
+    /// configuration chooses them.
+    async fn analysis_options(&self) -> anyhow::Result<Value> {
+        let state = self.state.read().await;
+        let config = state.effective_config();
+        let template = analyze::template(&config.analyze.command)
+            .context("cannot find the CodeSonar installation")?;
+        let template = std::fs::read_to_string(&template)
+            .with_context(|| format!("cannot read {}", template.display()))?;
+        let rules = &state.workspace.checks;
+        let checks: Vec<Value> = checks::checks(&template, &checks::LANGUAGES)
+            .into_iter()
+            .map(|check| {
+                let enabled = rules
+                    .iter()
+                    .find(|rule| rule.class == check.class)
+                    .map_or(check.default, |rule| rule.enabled);
+                json!({
+                    "class": check.class,
+                    "language": check.language,
+                    "default": check.default,
+                    "enabled": enabled,
+                })
+            })
+            .collect();
+        Ok(json!({
+            "conf": state.workspace.file,
+            "presets": analyze::presets(&config)?,
+            "checks": checks,
+        }))
+    }
+
+    /// Writes the presets and checks into the workspace configuration.
+    async fn configure_analysis(&self, args: ConfigureAnalysisArgs) -> anyhow::Result<Value> {
+        let defaults: Vec<(String, bool)> = {
+            let state = self.state.read().await;
+            let command = state.effective_config().analyze.command;
+            let template = analyze::template(&command)
+                .and_then(|template| std::fs::read_to_string(template).ok())
+                .unwrap_or_default();
+            checks::checks(&template, &checks::LANGUAGES)
+                .into_iter()
+                .map(|check| (check.class, check.default))
+                .collect()
+        };
+
+        {
+            let mut state = self.state.write().await;
+
+            if state.workspace.file.is_none() {
+                bail!("no workspace folder");
+            }
+
+            if let Some(presets) = args.presets {
+                state.workspace.presets = Some(presets);
+            }
+
+            for check in args.checks {
+                let default = defaults
+                    .iter()
+                    .find(|(class, _)| *class == check.class)
+                    .map(|(_, default)| *default);
+                state
+                    .workspace
+                    .checks
+                    .retain(|rule| rule.class != check.class);
+
+                // Rules only for what differs from CodeSonar's default.
+                if default != Some(check.enabled) {
+                    state.workspace.checks.push(CheckRule {
+                        class: check.class,
+                        enabled: check.enabled,
+                    });
+                }
+            }
+
+            state.workspace.write()?;
+        }
+
+        self.workspace_changed().await;
+        self.analysis_options().await
+    }
+
     /// Removes an analysis from the cache of downloaded analyses.
     async fn uncache(&self, id: u64) -> anyhow::Result<()> {
         let cache = Cache::of(&self.state.read().await.effective_config());
@@ -1291,6 +1375,8 @@ impl LanguageServer for Backend {
             commands::ANALYSES => self.analyses().await,
             commands::DELETE_ANALYSIS => self.delete_analysis(required(arguments)?).await,
             commands::LOAD => self.load_command(parse(arguments)?).await,
+            commands::ANALYSIS_OPTIONS => self.analysis_options().await,
+            commands::CONFIGURE_ANALYSIS => self.configure_analysis(parse(arguments)?).await,
             commands::UNCACHE => {
                 let args: DeleteAnalysisArgs = required(arguments)?;
 
