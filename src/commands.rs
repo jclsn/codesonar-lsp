@@ -18,6 +18,12 @@ pub const PROJECTS: &str = "codesonar.projects";
 /// Returns the analyses of the hub project, newest first:
 /// `{project, analyses: [{id, name, started, state, finished, current}]}`.
 pub const ANALYSES: &str = "codesonar.analyses";
+/// Deletes an analysis from the hub: `{analysis: id}`. Returns the
+/// analyses like [`ANALYSES`] with `deleted`, and the reason in `message`
+/// if the hub refused, e.g. without permission. If the shown analysis was
+/// deleted, the newest finished one is loaded afterwards, or none is shown
+/// without one.
+pub const DELETE_ANALYSIS: &str = "codesonar.deleteAnalysis";
 /// Loads an analysis: `{analysis: id}`, `{file: path}`, `{latest: true}`
 /// or nothing for the configured one. Returns the status.
 pub const LOAD: &str = "codesonar.load";
@@ -38,13 +44,14 @@ pub const PROJECT: &str = "codesonar.project";
 /// description, selected}]`. The setting `analyze.presets` selects them.
 pub const PRESETS: &str = "codesonar.presets";
 
-pub const ALL: [&str; 12] = [
+pub const ALL: [&str; 13] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
     CONNECT,
     PROJECTS,
     ANALYSES,
+    DELETE_ANALYSIS,
     LOAD,
     STATUS,
     WARNINGS,
@@ -72,6 +79,11 @@ pub enum Loading {}
 impl Notification for Loading {
     type Params = Value;
     const METHOD: &'static str = "codesonar/loading";
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteAnalysisArgs {
+    pub analysis: u64,
 }
 
 #[derive(Debug, Default, Deserialize)]

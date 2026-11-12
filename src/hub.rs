@@ -231,6 +231,90 @@ impl Hub {
         self.url(&format!("/analysis/{analysis_id}.html"))
     }
 
+    /// Deletes an analysis and its warnings from the hub. Refusals, e.g.
+    /// for missing permissions, are no error.
+    pub async fn delete_analysis(&self, analysis_id: u64) -> anyhow::Result<Deletion> {
+        // The hub only deletes analyses with the form of their project page,
+        // the analysis page ignores it.
+        let project = self.analysis_project(&analysis_id.to_string()).await?;
+        let path = format!("/project/{}.json", project.id);
+        let id = analysis_id.to_string();
+        let result = self
+            .send(&path, "delete analysis at", |url| {
+                self.client
+                    .post(url)
+                    .form(&[("remove_analysis_id", id.as_str())])
+            })
+            .await;
+        let user = match &self.config.username {
+            Some(username) => format!("the hub user {username}"),
+            None => "anonymous hub users".to_string(),
+        };
+        let response = match result {
+            Ok(response) => response,
+            Err(error) => {
+                return match error.downcast_ref::<StatusError>() {
+                    Some(status)
+                        if matches!(
+                            status.status,
+                            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+                        ) =>
+                    {
+                        Ok(Deletion::Refused(format!(
+                            "{user} may not delete analysis {analysis_id}{}",
+                            reason(&status.message)
+                        )))
+                    }
+                    _ => Err(error),
+                };
+            }
+        };
+        let body = response.text().await.unwrap_or_default();
+        let value: Value = serde_json::from_str(&body).unwrap_or_default();
+        let failure = value
+            .pointer("/change/results")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|result| text(result, "result") != "success");
+
+        Ok(match failure {
+            Some(failure) => {
+                let details = text(failure, "details");
+                let message = [text(failure, "message"), details]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(": ");
+                Deletion::Refused(format!(
+                    "the hub did not delete analysis {analysis_id}{}",
+                    reason(&message)
+                ))
+            }
+            None => self.deletion_of(analysis_id).await?,
+        })
+    }
+
+    /// Whether the analysis is gone after the hub accepted its deletion,
+    /// since the hub may also accept requests it ignores.
+    async fn deletion_of(&self, analysis_id: u64) -> anyhow::Result<Deletion> {
+        let analysis = match self.json(&format!("/analysis/{analysis_id}.json")).await {
+            Ok(analysis) => analysis,
+            Err(error) => {
+                return match error.downcast_ref::<StatusError>() {
+                    Some(status) if status.status == StatusCode::NOT_FOUND => Ok(Deletion::Deleted),
+                    _ => Err(error),
+                };
+            }
+        };
+
+        // Large analyses may take a while.
+        Ok(match text(&analysis, "state").contains("DELET") {
+            true => Deletion::Deleted,
+            false => Deletion::Refused(format!("the hub kept analysis {analysis_id}")),
+        })
+    }
+
     /// Requests `path` and returns the response body.
     pub async fn get(&self, path: &str) -> anyhow::Result<String> {
         self.response(path)
@@ -444,7 +528,42 @@ async fn send(request: RequestBuilder) -> anyhow::Result<Response> {
     check(request.send().await?).await
 }
 
-/// Turns error responses into errors with the hub's message.
+/// The outcome of deleting an analysis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Deletion {
+    Deleted,
+    /// The hub refused, with a message for the user.
+    Refused(String),
+}
+
+/// The hub's reason in parentheses, if it gave one.
+fn reason(message: &str) -> String {
+    match message.trim() {
+        "" => String::new(),
+        message => format!(" ({message})"),
+    }
+}
+
+/// An error response of the hub.
+#[derive(Debug)]
+pub struct StatusError {
+    pub status: StatusCode,
+    /// The hub's message, may be empty.
+    pub message: String,
+}
+
+impl std::fmt::Display for StatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.message.is_empty() {
+            true => write!(f, "{}", self.status),
+            false => write!(f, "{}: {}", self.status, self.message),
+        }
+    }
+}
+
+impl std::error::Error for StatusError {}
+
+/// Turns error responses into a [`StatusError`] with the hub's message.
 async fn check(response: Response) -> anyhow::Result<Response> {
     let status = response.status();
 
@@ -456,13 +575,11 @@ async fn check(response: Response) -> anyhow::Result<Response> {
     let message = serde_json::from_str::<HubError>(&body)
         .map(|error| error.error)
         .unwrap_or(body);
-    let message = message.trim();
-
-    if message.is_empty() {
-        bail!("{status}");
+    Err(StatusError {
+        status,
+        message: message.trim().to_string(),
     }
-
-    bail!("{status}: {message}");
+    .into())
 }
 
 #[cfg(test)]

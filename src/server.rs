@@ -16,13 +16,13 @@ use crate::analysis::{self, Analysis};
 use crate::analyze;
 use crate::code_action;
 use crate::commands::{
-    self, AnalyzeArgs, ConnectArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs,
-    REFRESH_COMMAND,
+    self, AnalyzeArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs, LoadArgs, OPEN_IN_HUB_COMMAND,
+    ProjectArgs, REFRESH_COMMAND,
 };
 use crate::config::{Config, HubConfig, expand_home};
 use crate::detect::{self, LocalProject};
 use crate::hover;
-use crate::hub::{self, Downloaded, Hub};
+use crate::hub::{self, Deletion, Downloaded, Hub};
 use crate::memory::{self, Memory};
 use crate::progress::{self, Progress};
 use crate::source::{self, Loaded, Selection};
@@ -687,6 +687,61 @@ impl Backend {
         Ok(json!({"project": project, "analyses": analyses}))
     }
 
+    async fn delete_analysis(&self, args: DeleteAnalysisArgs) -> anyhow::Result<Value> {
+        let id = args.analysis;
+        let (hub, shown) = {
+            let state = self.state.read().await;
+            let shown = state.analysis.as_ref().and_then(|a| a.hub_id.clone());
+            (Self::hub(&state)?, shown)
+        };
+        if let Deletion::Refused(message) = hub.delete_analysis(id).await? {
+            let mut value = self.analyses().await?;
+            value["deleted"] = json!(false);
+            value["message"] = json!(message);
+            return Ok(value);
+        }
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("CodeSonar: deleted analysis {id}"),
+            )
+            .await;
+
+        // Loading the next analysis can take a minute, the client should not
+        // wait for it.
+        if shown == Some(id.to_string()) {
+            let backend = self.clone();
+            tokio::spawn(async move {
+                if let Err(error) = backend.load(Selection::Latest).await {
+                    backend.unload().await;
+                    backend.warn(format!("{error:#}")).await;
+                }
+            });
+        }
+
+        let mut value = self.analyses().await?;
+        value["deleted"] = json!(true);
+        Ok(value)
+    }
+
+    /// Hides the shown analysis and its warnings.
+    async fn unload(&self) {
+        let uris = {
+            let mut state = self.state.write().await;
+            let uris: Vec<Url> = state.store.files().map(|(uri, _)| uri.clone()).collect();
+            state.analysis = None;
+            state.selection = None;
+            state.store = Store::default();
+            uris
+        };
+        self.publish(&uris).await;
+        let status = self.state.read().await.status();
+        self.client
+            .send_notification::<commands::Loaded>(status)
+            .await;
+    }
+
     async fn load_command(&self, args: LoadArgs) -> anyhow::Result<Value> {
         let selection = match (args.analysis, args.file) {
             (Some(Value::String(id)), _) => Selection::Hub(id),
@@ -1023,6 +1078,7 @@ impl LanguageServer for Backend {
             commands::CONNECT => self.connect(parse(arguments)?).await,
             commands::PROJECTS => self.projects().await,
             commands::ANALYSES => self.analyses().await,
+            commands::DELETE_ANALYSIS => self.delete_analysis(required(arguments)?).await,
             commands::LOAD => self.load_command(parse(arguments)?).await,
             commands::EXPLAIN_COMMAND => Ok(self.explain(required(arguments)?).await),
             commands::STATUS => Ok(self.state.read().await.status()),

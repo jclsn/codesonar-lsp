@@ -30,7 +30,7 @@ and editor clients that build on it.
 - **Quick fixes**, if the SARIF export contains fixes.
 - **Open in CodeSonar Hub** as a code action.
 - **Commands** for clients: sign in to a hub, list projects and analyses,
-  show an analysis and get the command line of a new analysis.
+  show or delete an analysis and get the command line of a new analysis.
 
 The warnings come from the CodeSonar hub or from an exported SARIF file.
 
@@ -123,6 +123,7 @@ argument, an object.
 | `codesonar.connect`         | `{url, username, password, project}`, all optional | The hub projects; with `project`, its newest analysis is shown |
 | `codesonar.projects`        |                                                  | `[{id, name}]` |
 | `codesonar.analyses`        |                                                  | `{project, analyses: [{id, name, started, state, finished, current}]}` |
+| `codesonar.deleteAnalysis`  | `{analysis}`                                     | Deletes the analysis from the hub and returns the analyses like `codesonar.analyses`, with `deleted` and the reason in `message` if the hub refused, e.g. without permission. If it was shown, the newest finished one is loaded afterwards |
 | `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
 | `codesonar.status`          |                                                  | `{loaded, hub, project, presets, name, key, hubId, url, total, shown, counts}` |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
