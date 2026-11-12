@@ -21,6 +21,14 @@ pub struct Hub {
     token: Mutex<Option<String>>,
 }
 
+/// How much of a download has arrived.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Downloaded {
+    pub received: u64,
+    /// The size, if the hub tells it.
+    pub total: Option<u64>,
+}
+
 /// Session returned by `/session/create-basic-auth/`.
 #[derive(Deserialize)]
 struct Session {
@@ -91,10 +99,34 @@ impl Hub {
         &self.config
     }
 
-    /// Downloads the SARIF export of an analysis.
-    pub async fn sarif(&self, analysis_id: &str) -> anyhow::Result<Log> {
+    /// Downloads the SARIF export of an analysis and tells `progress` how
+    /// much has arrived. The hub creates the export while sending it, which
+    /// takes long for big analyses.
+    pub async fn sarif(
+        &self,
+        analysis_id: &str,
+        progress: impl Fn(Downloaded),
+    ) -> anyhow::Result<Log> {
         let path = self.config.sarif_path(analysis_id);
-        let text = self.get(&path).await?;
+        let mut response = self.response(&path).await?;
+        let mut downloaded = Downloaded {
+            received: 0,
+            total: response.content_length(),
+        };
+        let mut body = Vec::new();
+        progress(downloaded);
+
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .with_context(|| format!("cannot download {path}"))?
+        {
+            body.extend_from_slice(&chunk);
+            downloaded.received = body.len() as u64;
+            progress(downloaded);
+        }
+
+        let text = String::from_utf8(body).with_context(|| format!("invalid SARIF from {path}"))?;
         Log::from_json(&text).with_context(|| format!("invalid SARIF from {path}"))
     }
 
@@ -199,9 +231,18 @@ impl Hub {
         self.url(&format!("/analysis/{analysis_id}.html"))
     }
 
+    /// Requests `path` and returns the response body.
+    pub async fn get(&self, path: &str) -> anyhow::Result<String> {
+        self.response(path)
+            .await?
+            .text()
+            .await
+            .with_context(|| format!("cannot download {path}"))
+    }
+
     /// Signs in once with the configured credentials, then requests `path`.
     /// An expired session is renewed once.
-    pub async fn get(&self, path: &str) -> anyhow::Result<String> {
+    async fn response(&self, path: &str) -> anyhow::Result<Response> {
         let url = self.url(path)?;
         let mut renewed = false;
 
@@ -227,11 +268,9 @@ impl Hub {
                 continue;
             }
 
-            return Ok(check(response)
+            return check(response)
                 .await
-                .with_context(|| format!("cannot download {url}"))?
-                .text()
-                .await?);
+                .with_context(|| format!("cannot download {url}"));
         }
     }
 
@@ -447,7 +486,7 @@ mod tests {
 
         let log = Hub::new(&config(&server, ""))
             .unwrap()
-            .sarif("7")
+            .sarif("7", |_| {})
             .await
             .unwrap();
         assert_eq!(log.runs[0].results.len(), 4);
@@ -487,7 +526,7 @@ mod tests {
 
         let log = Hub::new(&config)
             .unwrap()
-            .sarif(&config.analysis_id)
+            .sarif(&config.analysis_id, |_| {})
             .await
             .unwrap();
 
@@ -514,7 +553,7 @@ mod tests {
 
         let error = Hub::new(&config)
             .unwrap()
-            .sarif(&config.analysis_id)
+            .sarif(&config.analysis_id, |_| {})
             .await
             .unwrap_err();
 
@@ -541,7 +580,7 @@ mod tests {
 
         let error = Hub::new(&config)
             .unwrap()
-            .sarif(&config.analysis_id)
+            .sarif(&config.analysis_id, |_| {})
             .await
             .unwrap_err();
 
@@ -566,7 +605,7 @@ mod tests {
 
         let error = Hub::new(&config(&server, ""))
             .unwrap()
-            .sarif("7")
+            .sarif("7", |_| {})
             .await
             .unwrap_err();
 
@@ -582,7 +621,7 @@ mod tests {
 
         let error = Hub::new(&config)
             .unwrap()
-            .sarif(&config.analysis_id)
+            .sarif(&config.analysis_id, |_| {})
             .await
             .unwrap_err();
 

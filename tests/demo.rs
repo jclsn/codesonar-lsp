@@ -16,7 +16,7 @@ async fn warnings() -> Vec<Warning> {
         sarif_file: Some("codesonar.sarif".into()),
         ..Config::default()
     };
-    let loaded = source::load(&config, Some(demo()), None, Selection::Configured)
+    let loaded = source::load(&config, Some(demo()), None, Selection::Configured, |_| {})
         .await
         .unwrap()
         .unwrap();

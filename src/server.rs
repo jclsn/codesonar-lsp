@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, watch};
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -22,14 +22,17 @@ use crate::commands::{
 use crate::config::{Config, HubConfig, expand_home};
 use crate::detect::{self, LocalProject};
 use crate::hover;
-use crate::hub::{self, Hub};
+use crate::hub::{self, Downloaded, Hub};
 use crate::memory::{self, Memory};
-use crate::source::{self, Selection};
+use crate::progress::{self, Progress};
+use crate::source::{self, Loaded, Selection};
 use crate::store::Store;
 use crate::tracking::Anchor;
 use crate::warning::{self, Rule, Warning};
 
 const WATCH_PATTERN: &str = "**/*.sarif";
+/// How often the download progress is reported at most.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
 pub struct Backend {
     client: Client,
@@ -56,6 +59,7 @@ struct State {
     store: Store,
     documents: HashMap<Url, Document>,
     can_watch_files: bool,
+    can_show_progress: bool,
     /// The hub chosen with `codesonar.connect`, instead of the configured.
     connected: Option<HubConfig>,
     /// The CodeSonar project files of the workspace.
@@ -194,6 +198,18 @@ impl State {
     }
 }
 
+/// Reports downloads until they are done, at most every
+/// `PROGRESS_INTERVAL`.
+async fn report(progress: Progress, mut downloads: watch::Receiver<Downloaded>) -> Progress {
+    while downloads.changed().await.is_ok() {
+        let (message, percentage) = progress::download(*downloads.borrow_and_update());
+        progress.report(message, percentage).await;
+        tokio::time::sleep(PROGRESS_INTERVAL).await;
+    }
+
+    progress
+}
+
 fn open_memory(config: &Config) -> Option<Memory> {
     let dir = config.state_dir.clone().or_else(memory::default_dir)?;
     Some(Memory::open(&expand_home(&dir)))
@@ -240,19 +256,31 @@ impl Backend {
     async fn load(&self, selection: Selection) -> anyhow::Result<()> {
         let _guard = self.reload_lock.lock().await;
         self.detect_project().await;
-        let (config, root, hub) = {
+        let (config, root, hub, can_show_progress) = {
             let state = self.state.read().await;
             (
                 state.effective_config(),
                 state.root.clone(),
                 state.hub.clone(),
+                state.can_show_progress,
             )
         };
 
         self.loading(&config, root.as_deref(), &selection).await;
-        let Some(loaded) =
-            source::load(&config, root.as_deref(), hub.as_deref(), selection.clone()).await?
-        else {
+        let progress = match can_show_progress {
+            true => Progress::begin(&self.client, "Loading the analysis").await,
+            false => None,
+        };
+        let loaded = self
+            .download(
+                &config,
+                root.as_deref(),
+                hub.as_deref(),
+                &selection,
+                progress,
+            )
+            .await?;
+        let Some(loaded) = loaded else {
             self.client
                 .log_message(MessageType::INFO, "CodeSonar: no warning source configured")
                 .await;
@@ -295,6 +323,32 @@ impl Backend {
         }
 
         Ok(())
+    }
+
+    /// Loads the selected analysis and reports how much of it has arrived.
+    async fn download(
+        &self,
+        config: &Config,
+        root: Option<&Path>,
+        hub: Option<&Hub>,
+        selection: &Selection,
+        progress: Option<Progress>,
+    ) -> anyhow::Result<Option<Loaded>> {
+        let (sender, receiver) = watch::channel(Downloaded::default());
+        let reporter = progress.map(|progress| tokio::spawn(report(progress, receiver)));
+        let loaded = source::load(config, root, hub, selection.clone(), |downloaded| {
+            sender.send_replace(downloaded);
+        })
+        .await;
+        drop(sender);
+
+        if let Some(reporter) = reporter
+            && let Ok(progress) = reporter.await
+        {
+            progress.end().await;
+        }
+
+        loaded
     }
 
     /// Tells the client what starts loading.
@@ -783,6 +837,13 @@ impl LanguageServer for Backend {
             .and_then(|watch| watch.dynamic_registration)
             .unwrap_or(false);
 
+        let can_show_progress = params
+            .capabilities
+            .window
+            .as_ref()
+            .and_then(|window| window.work_done_progress)
+            .unwrap_or(false);
+
         let mut state = self.state.write().await;
         state.root = workspace_root(&params);
         state.local = state.root.as_deref().and_then(detect::local_project);
@@ -790,6 +851,7 @@ impl LanguageServer for Backend {
             .configure(config)
             .map_err(|e| Error::invalid_params(format!("{e:#}")))?;
         state.can_watch_files = can_watch_files;
+        state.can_show_progress = can_show_progress;
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {

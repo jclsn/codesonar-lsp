@@ -9,6 +9,7 @@ pub mod detect;
 pub mod hover;
 pub mod hub;
 pub mod memory;
+pub mod progress;
 pub mod sarif;
 pub mod server;
 pub mod source;

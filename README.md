@@ -135,8 +135,10 @@ argument, an object.
 
 When an analysis starts loading, the server sends the notification
 `codesonar/loading` with `{analysis}`, `{project}` or `{file}`. Large
-analyses take a minute. After an analysis was shown, it sends
-`codesonar/loaded` with the status.
+analyses take a minute, because the hub creates the SARIF export while
+sending it. If the client supports `window.workDoneProgress`, the server
+reports the download as work done progress, e.g. `Downloading 4.2 MB`.
+After an analysis was shown, it sends `codesonar/loaded` with the status.
 
 ## Other editors
 

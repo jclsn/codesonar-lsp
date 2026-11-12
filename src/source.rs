@@ -6,7 +6,7 @@ use std::time::UNIX_EPOCH;
 use anyhow::{Context, bail};
 
 use crate::config::Config;
-use crate::hub::Hub;
+use crate::hub::{Downloaded, Hub};
 use crate::sarif::Log;
 
 /// Which analysis to load.
@@ -31,12 +31,14 @@ pub struct Loaded {
     pub hub_id: Option<String>,
 }
 
-/// Loads the selected analysis. Returns `None` if no source is configured.
+/// Loads the selected analysis and tells `progress` how much of a hub
+/// download has arrived. Returns `None` if no source is configured.
 pub async fn load(
     config: &Config,
     root: Option<&Path>,
     hub: Option<&Hub>,
     selection: Selection,
+    progress: impl Fn(Downloaded),
 ) -> anyhow::Result<Option<Loaded>> {
     let Some(selection) = resolve(config, root, selection) else {
         return Ok(None);
@@ -44,9 +46,10 @@ pub async fn load(
 
     match selection {
         Selection::File(file) => load_file(&file, root).await.map(Some),
-        Selection::Hub(id) => load_hub(hub.context("no hub configured")?, config, &id, None)
-            .await
-            .map(Some),
+        Selection::Hub(id) => {
+            let hub = hub.context("no hub configured")?;
+            load_hub(hub, config, &id, None, progress).await.map(Some)
+        }
         Selection::Latest | Selection::Configured => {
             let hub = hub.context("no hub configured")?;
             let project = config
@@ -58,7 +61,8 @@ pub async fn load(
             let Some(latest) = analyses.into_iter().find(|a| a.is_finished()) else {
                 bail!("no finished analysis in hub project {project}");
             };
-            load_hub(hub, config, &latest.id.to_string(), Some(latest.name))
+            let id = latest.id.to_string();
+            load_hub(hub, config, &id, Some(latest.name), progress)
                 .await
                 .map(Some)
         }
@@ -85,8 +89,9 @@ async fn load_hub(
     config: &Config,
     id: &str,
     name: Option<String>,
+    progress: impl Fn(Downloaded),
 ) -> anyhow::Result<Loaded> {
-    let log = hub.sarif(id).await?;
+    let log = hub.sarif(id, progress).await?;
     let project = config.hub.as_ref().and_then(|hub| hub.project.as_ref());
     let name = match (name, project) {
         (Some(name), _) => Some(name),
@@ -163,7 +168,7 @@ mod tests {
 
     async fn configured(config: &Config, root: Option<&Path>) -> anyhow::Result<Option<Loaded>> {
         let hub = config.hub.as_ref().map(|hub| Hub::new(hub).unwrap());
-        load(config, root, hub.as_ref(), Selection::Configured).await
+        load(config, root, hub.as_ref(), Selection::Configured, |_| {}).await
     }
 
     #[tokio::test]
