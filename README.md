@@ -1,37 +1,16 @@
 # codesonar-lsp
 
-CodeSonar warnings in the editor: a language server that does all the work,
-and editor clients that build on it, like [codesonar.vim] for Vim.
+A language server that shows CodeSonar warnings in your editor, from a
+CodeSonar hub or from an exported SARIF file.
 
-| Folder                  | Content                                              |
-| ----------------------- | ---------------------------------------------------- |
-| `src`, `tests`          | The language server, in Rust                         |
-| `examples/demo`         | C file with a matching SARIF file                    |
-| `examples/test_project` | C program whose analyses are in the hub project `test_project` |
-
-[codesonar.vim]: https://github.com/jclsn/codesonar.vim
-
-## Features
-
-- **Diagnostics** for every CodeSonar warning, including severity, warning class
-  and related locations.
-- **Changed code**: analyses take minutes, so the code has often changed since
-  the shown one ran. Warnings move along with their code while it is edited,
-  and warnings whose line was edited disappear, because they are usually
-  fixed. The server remembers the analyzed code, so this also works after a
-  restart.
-- **Explanations** on hover: warning class, message, description and links to
-  the documentation and to the warning on the hub.
-- **Explain** as a code action: the explanation as structured data, for
-  clients that show it in their own view. It includes the events that lead
-  to the warning and the rules it may violate, with their titles from the
-  hub.
-- **Quick fixes**, if the SARIF export contains fixes.
-- **Open in CodeSonar Hub** as a code action.
-- **Commands** for clients: sign in to a hub, list projects and analyses,
-  show or delete an analysis and get the command line of a new analysis.
-
-The warnings come from the CodeSonar hub or from an exported SARIF file.
+- **Diagnostics** for every warning, with severity, warning class and
+  related locations.
+- **Follows your edits**: warnings move along with their code, and warnings
+  whose line you edited disappear, since they are usually fixed.
+- **Explanations** on hover, with links to the documentation and the hub.
+- **Quick fixes**, if the SARIF export contains them.
+- **Analyses**: choose, show or hide, and delete the analyses of a hub
+  project, or start a new, incremental one for the workspace.
 
 ## Installation
 
@@ -39,191 +18,141 @@ The warnings come from the CodeSonar hub or from an exported SARIF file.
 cargo install --path .
 ```
 
-For Vim, install the plugin [codesonar.vim] and see `:help codesonar`.
+This installs `codesonar-lsp` into `~/.cargo/bin`, which must be in `$PATH`.
 
-## Settings
+## Setup with Vim and yegappan/lsp
 
-The settings are passed as `initializationOptions`. They can be changed later
-via `workspace/didChangeConfiguration` under the `codesonar` key. Changes of
-the `analyze` settings keep the shown analysis.
+1. Install [yegappan/lsp] and [codesonar.vim], e.g. with vim-plug:
 
-```json
-{
-  "hub": {
-    "url": "https://hub.example.com:7340",
-    "project": "my_project",
-    "username": "alice",
-    "passwordFile": "~/.config/codesonar/password",
-    "caCertificate": "/etc/ssl/hub-ca.pem"
-  },
-  "pathMappings": [
-    { "from": "C:\\build\\project", "to": "/home/alice/project" }
-  ],
-  "changed": "hide",
-  "analyze": { "buildCommand": "make -B" }
-}
-```
+   ```vim
+   Plug 'yegappan/lsp'
+   Plug 'jclsn/codesonar.vim'
+   ```
 
-| Setting                  | Description                                                     |
-| ------------------------ | --------------------------------------------------------------- |
-| `hub.url`                | Hub URL.                                                        |
-| `hub.project`            | Hub project, by name or id. Its newest finished analysis is shown. Detected if not set, see below. |
-| `hub.analysisId`         | Show this analysis instead.                                     |
-| `hub.username`           | Hub user. Without one, the hub is accessed anonymously.         |
-| `hub.password`           | Hub password.                                                   |
-| `hub.passwordFile`       | File with the hub password. Without either, `CODESONAR_PASSWORD` is used. |
-| `hub.sarifPath`          | Hub path of the SARIF export. Default: `/analysis/{analysisId}-allwarnings.sarif`. |
-| `hub.caCertificate`      | PEM file with an additional trusted CA certificate.             |
-| `hub.acceptInvalidCerts` | Do not verify the hub's certificate.                            |
-| `sarifFile`              | SARIF file, absolute or relative to the workspace root. Used without `hub`. |
-| `pathMappings`           | Maps paths from the analysis machine to local paths.            |
-| `changed`                | Warnings in code changed since the analysis: `hide` or `mark` them as hints. |
-| `stateDir`               | Where the analyzed code is remembered. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
-| `cacheDir`               | Where downloaded analyses are kept. Default: `$XDG_CACHE_HOME/codesonar-lsp`. |
-| `cachedAnalyses`         | How many finished analyses of each hub project are kept downloaded, the most recently shown ones. `0` turns the cache off. Default: `10`. |
-| `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
-| `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Detected if not set, else `.codesonar/project`. |
-| `analyze.buildCommand`   | Build command, a string or a list. It must build everything, since CodeSonar only sees what is compiled. Default: `make -B`. |
-| `analyze.incrementalBuildCommand` | Build command of incremental analyses, which only need what changed since the last analysis. Default: `make`. |
-| `analyze.confFile`       | Configuration file of the workspace, relative to its root, passed with `-conf-file` if it exists. Default: `codesonar.conf`. |
-| `analyze.project`        | Hub project path. Default: `/` and `hub.project`.               |
-| `analyze.presets`        | CodeSonar presets of analyses, e.g. `["misrac2025", "cert"]`. |
-| `analyze.args`           | Further arguments of `codesonar analyze`.                       |
+2. Add the server like your other language servers. Only your hub
+   credentials go here:
 
-The file watcher covers `**/*.sarif`. Use `codesonar.refresh` for other files
-or for the hub.
+   ```vim
+   let codesonar = #{
+         \ name: 'codesonar',
+         \ filetype: ['c', 'cpp'],
+         \ path: expand('~/.cargo/bin/codesonar-lsp'),
+         \ initializationOptions: #{
+         \   hub: #{
+         \     username: 'alice',
+         \     passwordFile: '~/.config/codesonar/password',
+         \   },
+         \ },
+         \ }
+   call LspAddServer([codesonar])
+   ```
+
+   If you collect your servers in a list, `call add(lspServers, codesonar)`
+   works just as well.
+
+3. Open a file of your project and run `:CodeSonarConf`. It asks for the
+   hub address, the hub project and the build commands and writes them into
+   the `codesonar.conf` of the workspace, see below.
+
+4. `:CodeSonarAnalyses` lists the analyses of the project; `:CodeSonarAnalyze`
+   runs a new one. See `:help codesonar` for all commands.
+
+The warnings are regular diagnostics, so `:LspDiag next`, `:LspHover` and
+`:LspCodeAction` work as usual. Without codesonar.vim, the server works with
+plain yegappan/lsp too, but then the commands for analyses are missing.
+
+[yegappan/lsp]: https://github.com/yegappan/lsp
+[codesonar.vim]: https://github.com/jclsn/codesonar.vim
 
 ## The workspace configuration
 
-What an analysis is about belongs to the workspace, not to the editor:
-the server reads it from `codesonar.conf` in the workspace root
-(`analyze.confFile`), which `codesonar analyze` gets with `-conf-file`.
-CodeSonar's own settings stay as they are, e.g. `HUB_ADDRESS` names the
-hub. CodeSonar has no settings for the hub project, the presets and the
-build command, so the server keeps them in comments of a section that it
-writes, e.g. for `codesonar.configureAnalysis` or `codesonar.connect`:
+Everything about the analysis of a project lives in `codesonar.conf` in the
+workspace root, which `codesonar analyze` also reads. The server keeps its
+own settings in a section of comments that it writes for you:
 
 ```
 # BEGIN codesonar-lsp: written by codesonar-lsp, e.g. :CodeSonarPresets
-# codesonar-lsp: project = /mixxx
-# codesonar-lsp: presets = security concurrency
-# codesonar-lsp: build = cmake --build build --clean-first # full rebuild, for the first analysis
-# codesonar-lsp: incremental-build = cmake --build build    # what changed, for later analyses
-WARNING_FILTER += allow class="Function Too Long"
+# codesonar-lsp: project = /my_project
+# codesonar-lsp: presets = security
+# codesonar-lsp: build = make -B                 # full rebuild, for the first analysis
+# codesonar-lsp: incremental-build = make        # what changed, for later analyses
 # END codesonar-lsp
-HUB_ADDRESS = 192.168.184.28:7340
+
+HUB_ADDRESS = hub.example.com:7340
+INCREMENTAL_BUILD = Yes
 ```
 
-`HUB_ADDRESS` is CodeSonar's own setting, so the server keeps it outside
-the section. `codesonar.initConf` starts the configuration with the
-project, the build commands, `INCREMENTAL_BUILD` and `HUB_ADDRESS`. Only the first analysis
-needs the full rebuild, since CodeSonar only sees what is compiled; later
-ones are incremental and take the rest from their parent.
+- `project`: the hub project whose newest analysis is shown.
+- `presets`: CodeSonar presets of new analyses (`:CodeSonarPresets`).
+- `build`, `incremental-build`: the build commands. Only the first analysis
+  needs a full rebuild, since CodeSonar only sees what is compiled.
+- Checks chosen with `:CodeSonarChecks` become `WARNING_FILTER` rules in the
+  section.
 
-The section wins over the editor settings: `HUB_ADDRESS` over `hub.url`
-(keeping its scheme and credentials), `project` over `hub.project` and
-`analyze.project`, `presets`, `build` and `incremental-build` over the
-`analyze` settings. So the editor settings only need the credentials. The
-checks are rules for the warning classes that differ from CodeSonar's
-default; the presets and checks on offer come from the CodeSonar
-installation (`codesonar.analysisOptions`). Lines edited by hand in the
-section are kept, everything outside it is left alone.
+`HUB_ADDRESS` and `INCREMENTAL_BUILD` are CodeSonar's own settings and stay
+outside the section. You can edit the section by hand; everything else in
+the file is left alone.
 
-## How the project is detected
+## Settings
 
-Without a project in the workspace configuration, `hub.project` and
-`analyze.projectFile`, the server looks for the
-project files of an earlier `codesonar analyze` in the workspace root and
-in `.codesonar`, e.g. `mixxx.prj_files`. Their prefix is used for new
-analyses, and the hub project of their last analysis is shown. Without
-project files, the hub project named like the workspace folder is shown.
+The settings are the `initializationOptions` of the server. Usually only the
+credentials are needed, the rest comes from `codesonar.conf`.
 
-## How changed code is detected
+| Setting                  | Description                                                    |
+| ------------------------ | -------------------------------------------------------------- |
+| `hub.url`                | Hub URL, if `codesonar.conf` has no `HUB_ADDRESS`, or to use `https`. |
+| `hub.username`           | Hub user. Without one, the hub is accessed anonymously.        |
+| `hub.passwordFile`       | File with the password. Alternatives: `hub.password`, `$CODESONAR_PASSWORD`. |
+| `hub.project`            | Hub project, if `codesonar.conf` names none.                   |
+| `hub.caCertificate`      | PEM file with an additional trusted CA certificate.            |
+| `hub.acceptInvalidCerts` | Do not verify the hub's certificate.                           |
+| `sarifFile`              | SARIF file to show instead of a hub, relative to the workspace root. |
+| `pathMappings`           | `[{from, to}]`: paths of the analysis machine to local paths.  |
+| `changed`                | Warnings in changed code: `hide` (default) or `mark` them as hints. |
+| `cachedAnalyses`         | Downloaded analyses kept per project. Default: `10`, `0` turns it off. |
+| `analyze.command`        | The CodeSonar command. Default: `codesonar`.                   |
+| `analyze.args`           | Further arguments of `codesonar analyze`.                      |
 
-For each warning the server records the analyzed line and the closest
-non-blank lines around it. It reads them from the file while the file is
-unchanged since the analysis, and otherwise from the analyzed sources that
-the hub keeps. A warning then follows its line through edits. Once the line
-itself was edited or deleted, the warning counts as changed.
+Without a project in `codesonar.conf` or `hub.project`, the server uses the
+project files of an earlier `codesonar analyze` in the workspace, or else the
+hub project named like the workspace folder.
 
-## Commands
+For all settings, the commands and notifications for editor clients, and how
+changed code is detected, see [docs/protocol.md](docs/protocol.md).
 
-Clients run these with `workspace/executeCommand`. Each takes at most one
-argument, an object.
+## Other editors
 
-| Command                     | Argument                                         | Result |
-| --------------------------- | ------------------------------------------------ | ------ |
-| `codesonar.connect`         | `{url, username, password, project}`, all optional | The hub projects; with `project`, its newest analysis is shown |
-| `codesonar.projects`        |                                                  | `[{id, name}]` |
-| `codesonar.analyses`        |                                                  | `{project, analyses: [{id, name, started, state, finished, current, cached}]}` |
-| `codesonar.deleteAnalysis`  | `{analysis}`                                     | Deletes the analysis from the hub and returns the analyses like `codesonar.analyses`, with `deleted` and the reason in `message` if the hub refused, e.g. without permission. If it was shown, the newest finished one is loaded afterwards |
-| `codesonar.uncache`         | `{analysis}`                                     | Removes the analysis from the cache of downloaded analyses and returns the analyses like `codesonar.analyses` |
-| `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
-| `codesonar.hide`            |                                                  | Hides the shown analysis and its warnings until one is loaded with `codesonar.load`. Returns the status |
-| `codesonar.status`          |                                                  | `{loaded, hidden, hub, project, presets, conf, name, key, hubId, url, total, shown, counts}`; `conf` is the workspace configuration, if it exists |
-| `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
-| `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
-| `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, incremental, workspaceConf, workspaceConfExists, section, suggested: {project, build, hubAddress}}`: the project files and the workspace configuration; `createConf` creates the configuration file of the project from CodeSonar's template, `section` tells whether the workspace configuration has the section of the server |
-| `codesonar.initConf`        | `{project, build, hubAddress}`                   | Starts the workspace configuration with them and returns the project |
-| `codesonar.presets`         |                                                  | `[{name, description, selected}]`: the presets of the CodeSonar installation |
-| `codesonar.analysisOptions` |                                                  | `{conf, presets: [{name, description, selected}], checks: [{class, language, default, enabled}]}`: the presets and checks of the CodeSonar installation, as the workspace configuration chooses them |
-| `codesonar.configureAnalysis` | `{presets: [name], checks: [{class, enabled}]}`, both optional | Writes them into the workspace configuration and returns the options |
-| `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
-| `codesonar.refresh`         |                                                  | Loads the shown analysis again |
-| `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |
-
-When an analysis starts loading, the server sends the notification
-`codesonar/loading` with `{analysis}`, `{project}` or `{file}`. Large
-analyses take a minute, because the hub creates the SARIF export while
-sending it. If the client supports `window.workDoneProgress`, the server
-reports the download as work done progress, e.g. `Downloading 4.2 MB`.
-Finished analyses are kept downloaded (`cachedAnalyses`), so they show up
-quickly the next time. After an analysis was shown, it sends `codesonar/loaded` with the status.
-
-## Editors
-
-### Vim
-
-[codesonar.vim] registers the server with yegappan/lsp and adds commands
-for analyses, explanations and the hub.
-
-### Neovim
+Neovim:
 
 ```lua
 vim.lsp.config("codesonar", {
   cmd = { "codesonar-lsp" },
-  filetypes = { "c", "cpp", "java", "cs" },
-  root_markers = { ".git" },
-  init_options = { sarifFile = "codesonar.sarif" },
+  filetypes = { "c", "cpp" },
+  root_markers = { "codesonar.conf", ".git" },
+  init_options = { hub = { username = "alice", passwordFile = "~/.config/codesonar/password" } },
 })
 vim.lsp.enable("codesonar")
 ```
 
-### Helix
+Helix:
 
 ```toml
 [language-server.codesonar]
 command = "codesonar-lsp"
-config = { sarifFile = "codesonar.sarif" }
+config = { hub = { username = "alice", passwordFile = "~/.config/codesonar/password" } }
 
 [[language]]
 name = "c"
 language-servers = ["clangd", "codesonar"]
 ```
 
-## Demo
+## Examples
 
-`examples/demo` contains a C file with typical defects and a matching
-SARIF file in the CodeSonar format. Open the folder in your editor with
-this setting:
-
-```json
-{ "sarifFile": "codesonar.sarif" }
-```
-
-After changes to `main.c`, regenerate the SARIF file with
-`python3 gen_sarif.py main.c codesonar.sarif`. The hub links in the file
-are placeholders and only work with a matching analysis.
+- `examples/demo`: a C file with typical defects and a matching SARIF file.
+  Open it with the setting `{ "sarifFile": "codesonar.sarif" }`. After
+  changing `main.c`, run `python3 gen_sarif.py main.c codesonar.sarif`.
+- `examples/test_project`: a C program with a `codesonar.conf` for the hub
+  project `test_project`.
 
 ## Development
 
