@@ -276,7 +276,7 @@ fn offers_quick_fix_and_opens_hub() {
     );
 
     let actions = actions.as_array().unwrap();
-    assert_eq!(actions.len(), 3);
+    assert_eq!(actions.len(), 4);
     assert_eq!(actions[0]["kind"], "quickfix");
     assert_eq!(actions[0]["title"], "Check 'p' for NULL");
     let edits = &actions[0]["edit"]["changes"][main.as_str().unwrap()];

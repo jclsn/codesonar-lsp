@@ -18,14 +18,24 @@ pub const OPEN_IN_HUB_COMMAND: &str = "codesonar.openInHub";
 pub const EXPLAIN_COMMAND: &str = "codesonar.explain";
 /// Resolves warnings on the hub, see [`crate::commands::ResolveArgs`].
 pub const RESOLVE_COMMAND: &str = "codesonar.resolve";
+/// Disables the check of warnings, see [`crate::commands::DisableCheckArgs`].
+pub const DISABLE_CHECK_COMMAND: &str = "codesonar.disableCheck";
 
-/// The code actions for the warnings in a range. `on_hub` tells whether
-/// the warnings come from the hub, so they can be resolved there.
+/// What the code actions may offer besides fixes and explanations.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Offers {
+    /// The warnings come from the hub, so they can be resolved there.
+    pub resolve: bool,
+    /// The workspace has a configuration to disable checks in.
+    pub disable: bool,
+}
+
+/// The code actions for the warnings in a range.
 pub fn code_actions(
     store: &Store,
     uri: &Url,
     range: Range,
-    on_hub: bool,
+    offers: Offers,
 ) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
     let warnings = store.overlapping(uri, range);
@@ -78,7 +88,7 @@ pub fn code_actions(
                 ..CodeAction::default()
             }));
 
-            if on_hub && hub::warning_instance_id(hub_uri).is_some() {
+            if offers.resolve && hub::warning_instance_id(hub_uri).is_some() {
                 for resolution in Resolution::ALL {
                     let title = named(resolution.title(), warning, several);
                     actions.push(CodeActionOrCommand::CodeAction(CodeAction {
@@ -98,6 +108,22 @@ pub fn code_actions(
                     }));
                 }
             }
+        }
+
+        // Last, once the warning was looked into.
+        if let Some(class) = warning.rule_id.as_deref().filter(|_| offers.disable) {
+            let title = named("Disable check", warning, several);
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: title.clone(),
+                kind: Some(CodeActionKind::EMPTY),
+                diagnostics: Some(vec![diagnostic.clone()]),
+                command: Some(Command {
+                    title,
+                    command: DISABLE_CHECK_COMMAND.to_string(),
+                    arguments: Some(vec![json!({"class": class})]),
+                }),
+                ..CodeAction::default()
+            }));
         }
     }
 
@@ -146,14 +172,19 @@ mod tests {
         Store::new(warning::from_log(&log, &config, Some(Path::new("/ws"))))
     }
 
+    const ALL: Offers = Offers {
+        resolve: true,
+        disable: true,
+    };
+
     fn actions(path: &str, line: u32) -> Vec<CodeAction> {
-        actions_of(path, line, true)
+        actions_of(path, line, ALL)
     }
 
-    fn actions_of(path: &str, line: u32, on_hub: bool) -> Vec<CodeAction> {
+    fn actions_of(path: &str, line: u32, offers: Offers) -> Vec<CodeAction> {
         let uri = Url::from_file_path(path).unwrap();
         let position = Position::new(line, 4);
-        code_actions(&store(), &uri, Range::new(position, position), on_hub)
+        code_actions(&store(), &uri, Range::new(position, position), offers)
             .into_iter()
             .map(|action| match action {
                 CodeActionOrCommand::CodeAction(action) => action,
@@ -165,7 +196,7 @@ mod tests {
     #[test]
     fn offers_quick_fix() {
         let actions = actions("/ws/src/main.c", 4);
-        assert_eq!(actions.len(), 5);
+        assert_eq!(actions.len(), 6);
 
         let fix = &actions[0];
         assert_eq!(fix.title, "Check 'p' for NULL");
@@ -202,7 +233,7 @@ mod tests {
 
     #[test]
     fn offers_only_explanation_without_fixes_or_hub() {
-        let actions = actions("/ws/src/util file.c", 9);
+        let actions = actions_of("/ws/src/util file.c", 9, Offers::default());
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Show details            'MISC.FMT'");
         assert!(self::actions("/ws/src/main.c", 0).is_empty());
@@ -228,7 +259,7 @@ mod tests {
     fn offers_resolving_on_the_hub() {
         let actions = actions("/ws/src/main.c", 4);
 
-        let titles: Vec<&str> = actions[3..].iter().map(|a| a.title.as_str()).collect();
+        let titles: Vec<&str> = actions[3..5].iter().map(|a| a.title.as_str()).collect();
         assert_eq!(titles, ["Mark as fixed", "Mark as false positive",]);
 
         let command = actions[4].command.as_ref().unwrap();
@@ -239,9 +270,13 @@ mod tests {
         assert_eq!(argument["resolution"], "falsePositive");
         assert!(argument["fingerprint"].is_string());
 
+        let offers = Offers {
+            resolve: false,
+            ..ALL
+        };
         assert_eq!(
-            actions_of("/ws/src/main.c", 4, false).len(),
-            3,
+            actions_of("/ws/src/main.c", 4, offers).len(),
+            4,
             "not for SARIF files"
         );
     }
@@ -265,7 +300,7 @@ mod tests {
         let uri = Url::from_file_path("/ws/src/main.c").unwrap();
         let position = Position::new(4, 4);
 
-        let actions = code_actions(&store, &uri, Range::new(position, position), true);
+        let actions = code_actions(&store, &uri, Range::new(position, position), ALL);
 
         let titles: Vec<String> = actions
             .into_iter()
@@ -282,10 +317,12 @@ mod tests {
                 "Open in CodeSonar Hub   'LANG.MEM.NPD'",
                 "Mark as fixed           'LANG.MEM.NPD'",
                 "Mark as false positive  'LANG.MEM.NPD'",
+                "Disable check           'LANG.MEM.NPD'",
                 "Show details            'LANG.MEM.UAF'",
                 "Open in CodeSonar Hub   'LANG.MEM.UAF'",
                 "Mark as fixed           'LANG.MEM.UAF'",
                 "Mark as false positive  'LANG.MEM.UAF'",
+                "Disable check           'LANG.MEM.UAF'",
             ]
         );
     }

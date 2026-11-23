@@ -75,11 +75,14 @@ pub const ANALYSIS_OPTIONS: &str = "codesonar.analysisOptions";
 /// workspace configuration: `{presets: [name], checks: [{class, enabled}]}`,
 /// both optional. Returns the options like [`ANALYSIS_OPTIONS`].
 pub const CONFIGURE_ANALYSIS: &str = "codesonar.configureAnalysis";
+/// Disables a check in the workspace configuration, see
+/// [`DisableCheckArgs`].
+pub use crate::code_action::DISABLE_CHECK_COMMAND as DISABLE_CHECK;
 /// Returns the presets of the CodeSonar installation: `[{name,
 /// description, selected}]`. The setting `analyze.presets` selects them.
 pub const PRESETS: &str = "codesonar.presets";
 
-pub const ALL: [&str; 20] = [
+pub const ALL: [&str; 21] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
@@ -100,6 +103,7 @@ pub const ALL: [&str; 20] = [
     PRESETS,
     ANALYSIS_OPTIONS,
     CONFIGURE_ANALYSIS,
+    DISABLE_CHECK,
 ];
 
 /// Sent after an analysis was loaded and once more after the analyzed
@@ -216,6 +220,18 @@ pub struct ResolveArgs {
     pub fingerprint: Option<String>,
     pub range: Option<Range>,
     pub resolution: Resolution,
+    #[serde(default)]
+    pub quiet: bool,
+}
+
+/// Disables the check (warning class) of warnings for later analyses:
+/// `{class}`. Its rule goes into the section of codesonar-lsp in the
+/// workspace configuration, and its warnings are hidden now. Returns
+/// `{disabled, message}`, which the server also shows, unless `quiet` is
+/// set because the client shows it itself.
+#[derive(Debug, Deserialize)]
+pub struct DisableCheckArgs {
+    pub class: String,
     #[serde(default)]
     pub quiet: bool,
 }

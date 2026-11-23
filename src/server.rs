@@ -18,8 +18,9 @@ use crate::cache::Cache;
 use crate::checks;
 use crate::code_action;
 use crate::commands::{
-    self, AnalyzeArgs, ConfigureAnalysisArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs,
-    InitConfArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs, REFRESH_COMMAND, ResolveArgs,
+    self, AnalyzeArgs, CheckChoice, ConfigureAnalysisArgs, ConnectArgs, DeleteAnalysisArgs,
+    DisableCheckArgs, ExplainArgs, InitConfArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs,
+    REFRESH_COMMAND, ResolveArgs,
 };
 use crate::config::{Config, HubConfig, expand_home};
 use crate::detect::{self, LocalProject};
@@ -147,15 +148,37 @@ impl State {
         }
     }
 
-    /// Matches the warnings of a file to its current text again.
+    /// Matches the warnings of a file to its current text again. Warnings
+    /// of checks that the workspace configuration disables are left out.
     fn relocate(&mut self, uri: &Url) {
         let text = self.text(uri);
         let changed = self.config.changed;
+        let disabled = self.disabled_checks();
 
         if let Some(analysis) = &mut self.analysis {
             analysis.relocate(uri, &text);
-            self.store.set(uri, analysis.warnings(uri, changed));
+            let warnings = analysis
+                .warnings(uri, changed)
+                .into_iter()
+                .filter(|warning| {
+                    !warning
+                        .rule_id
+                        .as_deref()
+                        .is_some_and(|class| disabled.iter().any(|d| d == class))
+                })
+                .collect();
+            self.store.set(uri, warnings);
         }
+    }
+
+    /// The checks that the workspace configuration turns off.
+    fn disabled_checks(&self) -> Vec<String> {
+        self.workspace
+            .checks
+            .iter()
+            .filter(|rule| !rule.enabled)
+            .map(|rule| rule.class.clone())
+            .collect()
     }
 
     fn status(&self) -> Value {
@@ -800,9 +823,10 @@ impl Backend {
     /// Reads the workspace configuration again, and shows the analysis it
     /// names if that changed.
     async fn workspace_changed(&self) {
-        let reload = {
+        let (reload, disabled) = {
             let mut state = self.state.write().await;
             let before = state.hub_config();
+            let disabled = state.disabled_checks();
             let config = state.config.clone();
 
             if let Err(error) = state.configure(config) {
@@ -812,12 +836,94 @@ impl Backend {
                 return;
             }
 
-            state.hub_config() != before
+            (
+                state.hub_config() != before,
+                state.disabled_checks() != disabled,
+            )
         };
 
         if reload {
             self.reload().await;
+        } else if disabled {
+            self.show_again().await;
         }
+    }
+
+    /// Shows the warnings of the analysis again, e.g. after checks were
+    /// disabled.
+    async fn show_again(&self) {
+        let (uris, status) = {
+            let mut state = self.state.write().await;
+            let Some(analysis) = &state.analysis else {
+                return;
+            };
+            let mut uris: Vec<Url> = state.store.files().map(|(uri, _)| uri.clone()).collect();
+            uris.extend(analysis.uris().cloned());
+            uris.sort();
+            uris.dedup();
+
+            for uri in &uris {
+                state.relocate(uri);
+            }
+
+            (uris, state.status())
+        };
+
+        self.publish(&uris).await;
+        self.client
+            .send_notification::<commands::Loaded>(status)
+            .await;
+    }
+
+    /// Disables a check in the workspace configuration, so later analyses
+    /// leave it out and its warnings are hidden now.
+    async fn disable_check(&self, args: DisableCheckArgs) -> anyhow::Result<Value> {
+        let choice = ConfigureAnalysisArgs {
+            presets: None,
+            checks: vec![CheckChoice {
+                class: args.class.clone(),
+                enabled: false,
+            }],
+        };
+        let (disabled, message) = match self.configure_analysis(choice).await {
+            Ok(_) => (
+                true,
+                format!(
+                    "Disabled the check for '{}' in {}",
+                    args.class,
+                    self.conf_name().await
+                ),
+            ),
+            Err(error) => (
+                false,
+                format!("cannot disable the check for '{}': {error:#}", args.class),
+            ),
+        };
+
+        match disabled {
+            _ if args.quiet => {}
+            false => self.error(&message).await,
+            true => {
+                self.client
+                    .show_message(MessageType::INFO, format!("CodeSonar: {message}"))
+                    .await;
+            }
+        }
+
+        Ok(json!({"disabled": disabled, "message": message}))
+    }
+
+    /// The name of the workspace configuration file, for messages.
+    async fn conf_name(&self) -> String {
+        let state = self.state.read().await;
+        state
+            .workspace
+            .file
+            .as_deref()
+            .and_then(Path::file_name)
+            .map_or("the workspace configuration".into(), |name| {
+                name.to_string_lossy().into_owned()
+            })
     }
 
     /// The presets and checks that analyses can use, as the workspace
@@ -866,8 +972,9 @@ impl Backend {
                 .collect()
         };
 
-        {
+        let disabled = {
             let mut state = self.state.write().await;
+            let disabled = state.disabled_checks();
 
             if state.workspace.file.is_none() {
                 bail!("no workspace folder");
@@ -897,9 +1004,15 @@ impl Backend {
             }
 
             state.workspace.write()?;
-        }
+            state.disabled_checks() != disabled
+        };
 
         self.workspace_changed().await;
+
+        if disabled {
+            self.show_again().await;
+        }
+
         self.analysis_options().await
     }
 
@@ -1480,11 +1593,15 @@ impl LanguageServer for Backend {
                 .analysis
                 .as_ref()
                 .is_some_and(|analysis| analysis.hub_id.is_some());
+        let offers = code_action::Offers {
+            resolve: on_hub,
+            disable: state.workspace.file.is_some(),
+        };
         let actions = code_action::code_actions(
             &state.store,
             &params.text_document.uri,
             params.range,
-            on_hub,
+            offers,
         );
         Ok((!actions.is_empty()).then_some(actions))
     }
@@ -1507,6 +1624,7 @@ impl LanguageServer for Backend {
             commands::LOAD => self.load_command(parse(arguments)?).await,
             commands::ANALYSIS_OPTIONS => self.analysis_options().await,
             commands::CONFIGURE_ANALYSIS => self.configure_analysis(parse(arguments)?).await,
+            commands::DISABLE_CHECK => self.disable_check(required(arguments)?).await,
             commands::UNCACHE => {
                 let args: DeleteAnalysisArgs = required(arguments)?;
 

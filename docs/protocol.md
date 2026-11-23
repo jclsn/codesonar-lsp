@@ -134,6 +134,7 @@ argument, an object.
 | `codesonar.configureAnalysis` | `{presets: [name], checks: [{class, enabled}]}`, both optional | Writes them into the workspace configuration and returns the options |
 | `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
 | `codesonar.resolve`         | `{uri, fingerprint, resolution}` or `{uri, range, resolution}`; `resolution` is `fixed` or `falsePositive`, `quiet` is optional | Marks the warnings on the hub: the state `Fixed` or the finding `False Positive`. The hub keeps it for later analyses, and resolved warnings are not shown. Returns `{resolved, message}` and shows the message, unless `quiet` is set |
+| `codesonar.disableCheck`    | `{class}`, `quiet` is optional                   | Disables the check in the section of the workspace configuration, for later analyses, and hides its warnings now. Returns `{disabled, message}` and shows the message, unless `quiet` is set |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |
 | `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |
 

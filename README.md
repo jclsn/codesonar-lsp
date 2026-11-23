@@ -11,6 +11,8 @@ CodeSonar hub or from an exported SARIF file.
 - **Quick fixes**, if the SARIF export contains them.
 - **Resolve** warnings as fixed or as false positives on the hub, as code
   actions. Resolved warnings are hidden, also in later analyses.
+- **Disable checks** whose warnings you don't want, as a code action: the
+  check is turned off in `codesonar.conf` and its warnings are hidden.
 - **Analyses**: choose, show or hide, and delete the analyses of a hub
   project, or start a new, incremental one for the workspace.
 
@@ -88,8 +90,9 @@ INCREMENTAL_BUILD = Yes
 - `presets`: CodeSonar presets of new analyses (`:CodeSonarPresets`).
 - `build`, `incremental-build`: the build commands. Only the first analysis
   needs a full rebuild, since CodeSonar only sees what is compiled.
-- Checks chosen with `:CodeSonarChecks` become `WARNING_FILTER` rules in the
-  section.
+- Checks chosen with `:CodeSonarChecks` or disabled with the code action
+  become `WARNING_FILTER` rules in the section. Warnings of disabled checks
+  are not shown.
 
 `HUB_ADDRESS` and `INCREMENTAL_BUILD` are CodeSonar's own settings and stay
 outside the section. You can edit the section by hand; everything else in
