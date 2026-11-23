@@ -8,6 +8,7 @@ use tower_lsp::lsp_types::Url;
 
 use crate::config::Changed;
 use crate::tracking::{Anchor, Lines, Placement, Status};
+use crate::triage::Resolution;
 use crate::warning::{QuickFix, Warning};
 
 #[derive(Debug)]
@@ -72,6 +73,8 @@ pub struct Counts {
     pub moved: usize,
     pub changed: usize,
     pub unverified: usize,
+    /// Resolved on the hub, so not shown.
+    pub resolved: usize,
 }
 
 #[derive(Debug)]
@@ -168,12 +171,14 @@ impl Analysis {
         }
     }
 
-    /// The shown warnings of a file in the current code.
+    /// The shown warnings of a file in the current code. Resolved ones are
+    /// left out.
     pub fn warnings(&self, uri: &Url, changed: Changed) -> Vec<Warning> {
         self.files
             .get(uri)
             .into_iter()
             .flatten()
+            .filter(|t| t.warning.resolution.is_none())
             .filter(|t| changed == Changed::Mark || t.placement.status != Status::Changed)
             .map(Tracked::current)
             .collect()
@@ -181,6 +186,15 @@ impl Analysis {
 
     pub fn len(&self) -> usize {
         self.files.values().map(Vec::len).sum()
+    }
+
+    /// Records that the warning of a file was resolved on the hub.
+    pub fn resolve(&mut self, uri: &Url, fingerprint: &str, resolution: Resolution) {
+        for tracked in self.files.get_mut(uri).into_iter().flatten() {
+            if tracked.warning.fingerprint == fingerprint {
+                tracked.warning.resolution = Some(resolution);
+            }
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -191,6 +205,11 @@ impl Analysis {
         let mut counts = Counts::default();
 
         for tracked in self.files.values().flatten() {
+            if tracked.warning.resolution.is_some() {
+                counts.resolved += 1;
+                continue;
+            }
+
             match tracked.placement.status {
                 Status::Unchanged => counts.unchanged += 1,
                 Status::Moved => counts.moved += 1,
@@ -285,6 +304,7 @@ mod tests {
             events: Vec::new(),
             fingerprint: fingerprint.into(),
             status: Status::Unverified,
+            resolution: None,
         }
     }
 

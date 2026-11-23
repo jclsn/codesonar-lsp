@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::{
 use crate::config::Config;
 use crate::sarif::{self, ArtifactLocation, Level, Log, Region, Run, SarifResult};
 use crate::tracking::Status;
+use crate::triage::Resolution;
 
 pub const SOURCE: &str = "codesonar";
 const CHANGED_PREFIX: &str = "[changed since the analysis] ";
@@ -37,6 +38,8 @@ pub struct Warning {
     pub fingerprint: String,
     /// Whether the code of the warning changed since the analysis.
     pub status: Status,
+    /// Whether the warning was resolved on the hub, e.g. as fixed.
+    pub resolution: Option<Resolution>,
 }
 
 /// A rule of a coding standard, or the warning class itself, that a
@@ -165,6 +168,7 @@ impl Resolver<'_> {
         Some(Warning {
             fingerprint,
             status: Status::default(),
+            resolution: Resolution::of(&result.properties),
             uri,
             range,
             severity: to_severity(level),

@@ -19,7 +19,7 @@ use crate::checks;
 use crate::code_action;
 use crate::commands::{
     self, AnalyzeArgs, ConfigureAnalysisArgs, ConnectArgs, DeleteAnalysisArgs, ExplainArgs,
-    InitConfArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs, REFRESH_COMMAND,
+    InitConfArgs, LoadArgs, OPEN_IN_HUB_COMMAND, ProjectArgs, REFRESH_COMMAND, ResolveArgs,
 };
 use crate::config::{Config, HubConfig, expand_home};
 use crate::detect::{self, LocalProject};
@@ -30,6 +30,7 @@ use crate::progress::{self, Progress};
 use crate::source::{self, Loaded, Selection};
 use crate::store::Store;
 use crate::tracking::Anchor;
+use crate::triage::{self, Resolution};
 use crate::warning::{self, Rule, Warning};
 use crate::workspace::{CheckRule, WorkspaceConf};
 
@@ -1117,6 +1118,126 @@ impl Backend {
         json!(explanations)
     }
 
+    /// Resolves warnings on the hub and hides them. The outcome is shown
+    /// to the user, since code actions have no other way to tell it.
+    async fn resolve(&self, args: ResolveArgs) -> anyhow::Result<Value> {
+        let (hub, warnings, analysis_id, cache) = {
+            let state = self.state.read().await;
+            // (fingerprint, rule, instance id) of the warnings of the hub
+            let warnings: Vec<(String, String, u64)> = state
+                .store
+                .select(&args.uri, args.fingerprint.as_deref(), args.range)
+                .into_iter()
+                .filter_map(|warning| {
+                    let id = hub::warning_instance_id(warning.hub_uri.as_ref()?)?;
+                    let rule = warning.rule_id.clone().unwrap_or("the warning".into());
+                    Some((warning.fingerprint.clone(), rule, id))
+                })
+                .collect();
+            let analysis_id = state.analysis.as_ref().and_then(|a| a.hub_id.clone());
+            (
+                Self::hub(&state)?,
+                warnings,
+                analysis_id,
+                Cache::of(&state.effective_config()),
+            )
+        };
+        let resolution = args.resolution;
+        let mut resolved = Vec::new();
+        let mut failure = warnings
+            .is_empty()
+            .then(|| "no warning of the hub to resolve here".to_string());
+
+        for (fingerprint, rule, id) in warnings {
+            match hub.resolve(id, resolution).await {
+                Ok(()) => resolved.push((fingerprint, rule, id)),
+                Err(error) => {
+                    failure = Some(format!("{error:#}"));
+                    break;
+                }
+            }
+        }
+
+        if !resolved.is_empty() {
+            let status = {
+                let mut state = self.state.write().await;
+
+                if let Some(analysis) = &mut state.analysis {
+                    for (fingerprint, _, _) in &resolved {
+                        analysis.resolve(&args.uri, fingerprint, resolution);
+                    }
+                }
+
+                state.relocate(&args.uri);
+                state.status()
+            };
+            self.publish(std::slice::from_ref(&args.uri)).await;
+            self.client
+                .send_notification::<commands::Loaded>(status)
+                .await;
+
+            if let (Some(cache), Some(analysis_id)) = (cache, analysis_id) {
+                let ids: Vec<u64> = resolved.iter().map(|(_, _, id)| *id).collect();
+                self.mark_cached(cache, analysis_id, ids, resolution).await;
+            }
+        }
+
+        let message = match (&resolved[..], &failure) {
+            (_, Some(failure)) => failure.clone(),
+            ([(_, rule, _)], None) => {
+                format!("Marked '{rule}' as {} on the hub", resolution.describe())
+            }
+            (resolved, None) => format!(
+                "Marked {} warnings as {} on the hub",
+                resolved.len(),
+                resolution.describe()
+            ),
+        };
+
+        match failure {
+            _ if args.quiet => {}
+            Some(_) => self.error(&message).await,
+            None => {
+                self.client
+                    .show_message(MessageType::INFO, format!("CodeSonar: {message}"))
+                    .await;
+            }
+        }
+
+        Ok(json!({"resolved": resolved.len(), "message": message}))
+    }
+
+    /// Records resolved warnings in the cached export of their analysis, so
+    /// they stay hidden when it is loaded from the cache.
+    async fn mark_cached(
+        &self,
+        cache: Cache,
+        analysis_id: String,
+        ids: Vec<u64>,
+        resolution: Resolution,
+    ) {
+        let result = tokio::task::spawn_blocking(move || {
+            let Some(mut sarif) = cache.get(&analysis_id) else {
+                return Ok(());
+            };
+
+            for id in ids {
+                if let Some(marked) = triage::mark(&sarif, id, resolution) {
+                    sarif = marked;
+                }
+            }
+
+            cache.put(&analysis_id, &sarif)
+        })
+        .await;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => self.warn(format!("{error:#}")).await,
+            Err(error) => self.warn(error.to_string()).await,
+        }
+    }
+
     async fn warning_rules(&self, hub: &Hub, hub_uri: Option<&Url>) -> Option<Vec<Rule>> {
         let hub_uri = hub_uri?;
         let id = hub::warning_instance_id(hub_uri)?;
@@ -1354,8 +1475,17 @@ impl LanguageServer for Backend {
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let state = self.state.read().await;
-        let actions =
-            code_action::code_actions(&state.store, &params.text_document.uri, params.range);
+        let on_hub = state.hub.is_some()
+            && state
+                .analysis
+                .as_ref()
+                .is_some_and(|analysis| analysis.hub_id.is_some());
+        let actions = code_action::code_actions(
+            &state.store,
+            &params.text_document.uri,
+            params.range,
+            on_hub,
+        );
         Ok((!actions.is_empty()).then_some(actions))
     }
 
@@ -1391,6 +1521,7 @@ impl LanguageServer for Backend {
             }
             commands::TOGGLE => self.toggle().await,
             commands::EXPLAIN_COMMAND => Ok(self.explain(required(arguments)?).await),
+            commands::RESOLVE_COMMAND => self.resolve(required(arguments)?).await,
             commands::STATUS => Ok(self.state.read().await.status()),
             commands::WARNINGS => Ok(self.state.read().await.warnings()),
             commands::ANALYZE_COMMAND => self.analyze_command(parse(arguments)?).await,

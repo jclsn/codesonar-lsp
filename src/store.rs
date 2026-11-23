@@ -49,6 +49,25 @@ impl Store {
         self.files.is_empty()
     }
 
+    /// The warnings of a file with the fingerprint, else those in the
+    /// range, else all.
+    pub fn select(
+        &self,
+        uri: &Url,
+        fingerprint: Option<&str>,
+        range: Option<Range>,
+    ) -> Vec<&Warning> {
+        match (fingerprint, range) {
+            (Some(fingerprint), _) => self
+                .get(uri)
+                .iter()
+                .filter(|warning| warning.fingerprint == fingerprint)
+                .collect(),
+            (None, Some(range)) => self.overlapping(uri, range),
+            (None, None) => self.get(uri).iter().collect(),
+        }
+    }
+
     /// Warnings whose range contains `position`.
     pub fn at(&self, uri: &Url, position: Position) -> Vec<&Warning> {
         self.overlapping(uri, Range::new(position, position))
@@ -89,6 +108,7 @@ mod tests {
             events: Vec::new(),
             fingerprint: String::new(),
             status: Default::default(),
+            resolution: None,
         }
     }
 

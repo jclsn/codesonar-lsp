@@ -145,6 +145,9 @@ pub struct SarifResult {
     pub hosted_viewer_uri: Option<String>,
     pub fingerprints: HashMap<String, String>,
     pub partial_fingerprints: HashMap<String, String>,
+    /// CodeSonar's properties of the warning, e.g. its `state` and
+    /// `finding` on the hub.
+    pub properties: serde_json::Value,
 }
 
 impl SarifResult {

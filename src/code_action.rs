@@ -5,7 +5,9 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Command, Range, Url, WorkspaceEdit,
 };
 
+use crate::hub;
 use crate::store::Store;
+use crate::triage::Resolution;
 
 /// Reloads the warnings.
 pub const REFRESH_COMMAND: &str = "codesonar.refresh";
@@ -13,8 +15,17 @@ pub const REFRESH_COMMAND: &str = "codesonar.refresh";
 pub const OPEN_IN_HUB_COMMAND: &str = "codesonar.openInHub";
 /// Explains warnings, see [`crate::commands::ExplainArgs`].
 pub const EXPLAIN_COMMAND: &str = "codesonar.explain";
+/// Resolves warnings on the hub, see [`crate::commands::ResolveArgs`].
+pub const RESOLVE_COMMAND: &str = "codesonar.resolve";
 
-pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrCommand> {
+/// The code actions for the warnings in a range. `on_hub` tells whether
+/// the warnings come from the hub, so they can be resolved there.
+pub fn code_actions(
+    store: &Store,
+    uri: &Url,
+    range: Range,
+    on_hub: bool,
+) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
 
     for warning in store.overlapping(uri, range) {
@@ -60,7 +71,7 @@ pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrC
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: title.clone(),
                 kind: Some(CodeActionKind::EMPTY),
-                diagnostics: Some(vec![diagnostic]),
+                diagnostics: Some(vec![diagnostic.clone()]),
                 command: Some(Command {
                     title,
                     command: OPEN_IN_HUB_COMMAND.to_string(),
@@ -68,6 +79,27 @@ pub fn code_actions(store: &Store, uri: &Url, range: Range) -> Vec<CodeActionOrC
                 }),
                 ..CodeAction::default()
             }));
+
+            if on_hub && hub::warning_instance_id(hub_uri).is_some() {
+                for resolution in Resolution::ALL {
+                    let title = resolution.title().to_string();
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: title.clone(),
+                        kind: Some(CodeActionKind::EMPTY),
+                        diagnostics: Some(vec![diagnostic.clone()]),
+                        command: Some(Command {
+                            title,
+                            command: RESOLVE_COMMAND.to_string(),
+                            arguments: Some(vec![json!({
+                                "uri": warning.uri,
+                                "fingerprint": warning.fingerprint,
+                                "resolution": resolution,
+                            })]),
+                        }),
+                        ..CodeAction::default()
+                    }));
+                }
+            }
         }
     }
 
@@ -100,7 +132,7 @@ mod tests {
     fn actions(path: &str, line: u32) -> Vec<CodeAction> {
         let uri = Url::from_file_path(path).unwrap();
         let position = Position::new(line, 4);
-        code_actions(&store(), &uri, Range::new(position, position))
+        code_actions(&store(), &uri, Range::new(position, position), true)
             .into_iter()
             .map(|action| match action {
                 CodeActionOrCommand::CodeAction(action) => action,
@@ -112,7 +144,7 @@ mod tests {
     #[test]
     fn offers_quick_fix() {
         let actions = actions("/ws/src/main.c", 4);
-        assert_eq!(actions.len(), 3);
+        assert_eq!(actions.len(), 5);
 
         let fix = &actions[0];
         assert_eq!(fix.title, "Check 'p' for NULL");

@@ -124,7 +124,7 @@ argument, an object.
 | `codesonar.load`            | `{analysis: id}`, `{file: path}`, `{latest: true}` or none | The status |
 | `codesonar.hide`            |                                                  | Hides the shown analysis and its warnings until one is loaded with `codesonar.load`. Returns the status |
 | `codesonar.toggle`          |                                                  | Hides the shown analysis like `codesonar.hide`, or shows the hidden one again. Returns the status |
-| `codesonar.status`          |                                                  | `{loaded, hidden, hub, project, presets, conf, name, key, hubId, url, total, shown, counts}`; `conf` is the workspace configuration, if it exists |
+| `codesonar.status`          |                                                  | `{loaded, hidden, hub, project, presets, conf, name, key, hubId, url, total, shown, counts}`; `conf` is the workspace configuration, if it exists, `counts` has `unchanged`, `moved`, `changed`, `unverified` and `resolved` warnings |
 | `codesonar.warnings`        |                                                  | The shown diagnostics with `uri`, `status` and `hubUri` |
 | `codesonar.analyzeCommand`  | `{name}`, optional                               | `{command, cwd, temporaryFiles}`: run it, then delete the files |
 | `codesonar.project`         | `{createConf}`, optional                         | `{prefix, conf, confExists, created, incremental, workspaceConf, workspaceConfExists, section, suggested: {project, build, incremental, incrementalBuild, hubAddress}}`: the project files and the workspace configuration; `createConf` creates the configuration file of the project from CodeSonar's template, `section` tells whether the workspace configuration has the section of the server |
@@ -133,6 +133,7 @@ argument, an object.
 | `codesonar.analysisOptions` |                                                  | `{conf, presets: [{name, description, selected}], checks: [{class, language, default, enabled}]}`: the presets and checks of the CodeSonar installation, as the workspace configuration chooses them |
 | `codesonar.configureAnalysis` | `{presets: [name], checks: [{class, enabled}]}`, both optional | Writes them into the workspace configuration and returns the options |
 | `codesonar.explain`         | `{uri, fingerprint}` or `{uri, range}`           | `[{title, ruleId, message, description, status, related, events, rules, helpUri, hubUri, markdown}]` |
+| `codesonar.resolve`         | `{uri, fingerprint, resolution}` or `{uri, range, resolution}`; `resolution` is `fixed` or `falsePositive`, `quiet` is optional | Marks the warnings on the hub: the state `Fixed` or the finding `False Positive`. The hub keeps it for later analyses, and resolved warnings are not shown. Returns `{resolved, message}` and shows the message, unless `quiet` is set |
 | `codesonar.refresh`         |                                                  | Loads the shown analysis again |
 | `codesonar.openInHub`       | The warning URL                                  | Opens it with `window/showDocument` |
 

@@ -17,5 +17,6 @@ pub mod server;
 pub mod source;
 pub mod store;
 pub mod tracking;
+pub mod triage;
 pub mod warning;
 pub mod workspace;

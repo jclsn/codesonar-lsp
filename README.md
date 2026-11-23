@@ -9,6 +9,8 @@ CodeSonar hub or from an exported SARIF file.
   whose line you edited disappear, since they are usually fixed.
 - **Explanations** on hover, with links to the documentation and the hub.
 - **Quick fixes**, if the SARIF export contains them.
+- **Resolve** warnings as fixed or as false positives on the hub, as code
+  actions. Resolved warnings are hidden, also in later analyses.
 - **Analyses**: choose, show or hide, and delete the analyses of a hub
   project, or start a new, incremental one for the workspace.
 

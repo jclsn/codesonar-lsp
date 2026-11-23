@@ -8,7 +8,10 @@ use serde_json::Value;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::{Range, Url};
 
-pub use crate::code_action::{EXPLAIN_COMMAND, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND};
+pub use crate::code_action::{
+    EXPLAIN_COMMAND, OPEN_IN_HUB_COMMAND, REFRESH_COMMAND, RESOLVE_COMMAND,
+};
+use crate::triage::Resolution;
 
 /// Sets the hub and signs in: `{url, username, password, project}`, all
 /// optional. Returns the hub projects.
@@ -76,10 +79,11 @@ pub const CONFIGURE_ANALYSIS: &str = "codesonar.configureAnalysis";
 /// description, selected}]`. The setting `analyze.presets` selects them.
 pub const PRESETS: &str = "codesonar.presets";
 
-pub const ALL: [&str; 19] = [
+pub const ALL: [&str; 20] = [
     REFRESH_COMMAND,
     OPEN_IN_HUB_COMMAND,
     EXPLAIN_COMMAND,
+    RESOLVE_COMMAND,
     CONNECT,
     PROJECTS,
     ANALYSES,
@@ -198,6 +202,22 @@ pub struct ExplainArgs {
     pub uri: Url,
     pub fingerprint: Option<String>,
     pub range: Option<Range>,
+}
+
+/// Resolves warnings of a file on the hub: `{uri, fingerprint, resolution}`
+/// picks one by its fingerprint, `{uri, range, resolution}` those in a
+/// range; `resolution` is `fixed` or `falsePositive`. The hub keeps it
+/// for later analyses, and resolved warnings are not shown. Returns
+/// `{resolved, message}`, which the server also shows, unless `quiet` is
+/// set because the client shows it itself.
+#[derive(Debug, Deserialize)]
+pub struct ResolveArgs {
+    pub uri: Url,
+    pub fingerprint: Option<String>,
+    pub range: Option<Range>,
+    pub resolution: Resolution,
+    #[serde(default)]
+    pub quiet: bool,
 }
 
 /// Parses the first argument of a command; a missing one is the default.

@@ -131,16 +131,11 @@ pub fn explain(
     fingerprint: Option<&str>,
     range: Option<Range>,
 ) -> Vec<Explanation> {
-    let warnings: Vec<&Warning> = match (fingerprint, range) {
-        (Some(fingerprint), _) => store
-            .get(uri)
-            .iter()
-            .filter(|warning| warning.fingerprint == fingerprint)
-            .collect(),
-        (None, Some(range)) => store.overlapping(uri, range),
-        (None, None) => store.get(uri).iter().collect(),
-    };
-    warnings.into_iter().map(Explanation::new).collect()
+    store
+        .select(uri, fingerprint, range)
+        .into_iter()
+        .map(Explanation::new)
+        .collect()
 }
 
 fn title(warning: &Warning) -> &str {

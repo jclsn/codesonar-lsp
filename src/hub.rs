@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use crate::config::HubConfig;
 use crate::sarif::Log;
+use crate::triage::Resolution;
 use crate::warning::Rule;
 
 pub struct Hub {
@@ -257,10 +258,7 @@ impl Hub {
                     .form(&[("remove_analysis_id", id.as_str())])
             })
             .await;
-        let user = match &self.config.username {
-            Some(username) => format!("the hub user {username}"),
-            None => "anonymous hub users".to_string(),
-        };
+        let user = self.user();
         let response = match result {
             Ok(response) => response,
             Err(error) => {
@@ -304,6 +302,61 @@ impl Hub {
             }
             None => self.deletion_of(analysis_id).await?,
         })
+    }
+
+    /// Resolves a warning, e.g. as fixed. Refusals, e.g. for missing
+    /// permissions, are errors with a message for the user.
+    pub async fn resolve(&self, instance_id: u64, resolution: Resolution) -> anyhow::Result<()> {
+        let path = format!("/warninginstance/{instance_id}.json");
+        let (property, value) = resolution.property();
+        // The hub takes the values as JSON strings.
+        let value = Value::from(value).to_string();
+        let result = self
+            .send(&path, "change warning at", |url| {
+                self.client
+                    .post(url)
+                    .form(&[(resolution.form_field(), value.as_str())])
+            })
+            .await;
+
+        if let Err(error) = result {
+            return match error.downcast_ref::<StatusError>() {
+                Some(status)
+                    if matches!(
+                        status.status,
+                        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+                    ) =>
+                {
+                    bail!(
+                        "{} may not change warning {instance_id}{}",
+                        self.user(),
+                        reason(&status.message)
+                    )
+                }
+                _ => Err(error),
+            };
+        }
+
+        // The hub may also accept requests it ignores.
+        let warning = self.json(&path).await?;
+        let label = format!("/group/{property}/label");
+
+        if warning.pointer(&label).and_then(Value::as_str) != Some(resolution.property().1) {
+            bail!(
+                "the hub did not mark warning {instance_id} as {}",
+                resolution.describe()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// The hub user in messages.
+    fn user(&self) -> String {
+        match &self.config.username {
+            Some(username) => format!("the hub user {username}"),
+            None => "anonymous hub users".to_string(),
+        }
     }
 
     /// Whether the analysis is gone after the hub accepted its deletion,
