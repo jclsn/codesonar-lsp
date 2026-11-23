@@ -245,4 +245,48 @@ mod tests {
             "not for SARIF files"
         );
     }
+
+    #[test]
+    fn names_the_warnings_if_there_are_several() {
+        let mut warnings: Vec<Warning> = store()
+            .get(&Url::from_file_path("/ws/src/main.c").unwrap())
+            .to_vec();
+
+        // Another warning at the same spot, without a quick fix.
+        let other = Warning {
+            rule_id: Some("LANG.MEM.UAF".into()),
+            fingerprint: "other".into(),
+            fixes: Vec::new(),
+            ..warnings[0].clone()
+        };
+        warnings.push(other);
+
+        let store = Store::new(warnings);
+        let uri = Url::from_file_path("/ws/src/main.c").unwrap();
+        let position = Position::new(4, 4);
+
+        let actions = code_actions(&store, &uri, Range::new(position, position), true);
+
+        let titles: Vec<String> = actions
+            .into_iter()
+            .map(|action| match action {
+                CodeActionOrCommand::CodeAction(action) => action.title,
+                other => panic!("unexpected command: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                "Check 'p' for NULL",
+                "Show details            'LANG.MEM.NPD'",
+                "Open in CodeSonar Hub   'LANG.MEM.NPD'",
+                "Mark as fixed           'LANG.MEM.NPD'",
+                "Mark as false positive  'LANG.MEM.NPD'",
+                "Show details            'LANG.MEM.UAF'",
+                "Open in CodeSonar Hub   'LANG.MEM.UAF'",
+                "Mark as fixed           'LANG.MEM.UAF'",
+                "Mark as false positive  'LANG.MEM.UAF'",
+            ]
+        );
+    }
 }
