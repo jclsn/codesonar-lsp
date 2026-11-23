@@ -326,4 +326,30 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn offers_disabling_the_check_last() {
+        let actions = actions("/ws/src/main.c", 4);
+
+        let disable = actions.last().unwrap();
+        assert_eq!(disable.title, "Disable check");
+
+        let command = disable.command.as_ref().unwrap();
+        assert_eq!(command.command, DISABLE_CHECK_COMMAND);
+        assert_eq!(
+            command.arguments,
+            Some(vec![json!({"class": "LANG.MEM.NPD"})])
+        );
+
+        let offers = Offers {
+            disable: false,
+            ..ALL
+        };
+        assert!(
+            actions_of("/ws/src/main.c", 4, offers)
+                .iter()
+                .all(|action| action.title != "Disable check"),
+            "not without a workspace configuration"
+        );
+    }
 }

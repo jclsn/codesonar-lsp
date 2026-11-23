@@ -301,6 +301,47 @@ fn offers_quick_fix_and_opens_hub() {
 }
 
 #[test]
+fn disables_checks() {
+    let dir = workspace();
+    let mut client = Client::initialize(dir.path(), options(dir.path()));
+    let main = uri(dir.path().join("src/main.c"));
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] != json!([])
+    });
+
+    let disabled = client.command("codesonar.disableCheck", json!({"class": "LANG.MEM.NPD"}));
+
+    assert_eq!(disabled["disabled"], true);
+    assert_eq!(
+        disabled["message"],
+        "Disabled the check for 'LANG.MEM.NPD' in codesonar.conf"
+    );
+
+    client.expect("window/showMessage", |p| {
+        p["type"] == 3
+            && p["message"] == "CodeSonar: Disabled the check for 'LANG.MEM.NPD' in codesonar.conf"
+    });
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] == json!([])
+    });
+
+    let conf = std::fs::read_to_string(dir.path().join("codesonar.conf")).unwrap();
+    assert!(conf.contains("WARNING_FILTER += discard class=\"LANG.MEM.NPD\""));
+
+    // Enabled again, its warnings are back.
+    client.command(
+        "codesonar.configureAnalysis",
+        json!({"checks": [{"class": "LANG.MEM.NPD", "enabled": true}]}),
+    );
+
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] != json!([])
+    });
+
+    client.shutdown();
+}
+
+#[test]
 fn explains_warning() {
     let dir = workspace();
     let mut client = Client::initialize(dir.path(), options(dir.path()));
