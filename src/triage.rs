@@ -39,7 +39,7 @@ impl Resolution {
         }
     }
 
-    /// The title of its code action.
+    /// The action of its code action.
     pub fn title(self) -> &'static str {
         match self {
             Resolution::Fixed => "Mark as fixed",

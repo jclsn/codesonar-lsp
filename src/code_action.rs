@@ -8,6 +8,7 @@ use tower_lsp::lsp_types::{
 use crate::hub;
 use crate::store::Store;
 use crate::triage::Resolution;
+use crate::warning::Warning;
 
 /// Reloads the warnings.
 pub const REFRESH_COMMAND: &str = "codesonar.refresh";
@@ -27,8 +28,10 @@ pub fn code_actions(
     on_hub: bool,
 ) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
+    let warnings = store.overlapping(uri, range);
+    let several = warnings.len() > 1;
 
-    for warning in store.overlapping(uri, range) {
+    for warning in warnings {
         let diagnostic = warning.to_diagnostic();
 
         for (index, fix) in warning.fixes.iter().enumerate() {
@@ -45,10 +48,8 @@ pub fn code_actions(
             }));
         }
 
-        let title = format!(
-            "Show details for {}",
-            warning.rule_id.as_deref().unwrap_or("warning")
-        );
+        // Explanations always tell what they explain.
+        let title = named("Show details", warning, true);
         actions.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: title.clone(),
             kind: Some(CodeActionKind::EMPTY),
@@ -64,10 +65,7 @@ pub fn code_actions(
         }));
 
         if let Some(hub_uri) = &warning.hub_uri {
-            let title = format!(
-                "Open {} in CodeSonar Hub",
-                warning.rule_id.as_deref().unwrap_or("warning")
-            );
+            let title = named("Open in CodeSonar Hub", warning, several);
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: title.clone(),
                 kind: Some(CodeActionKind::EMPTY),
@@ -82,7 +80,7 @@ pub fn code_actions(
 
             if on_hub && hub::warning_instance_id(hub_uri).is_some() {
                 for resolution in Resolution::ALL {
-                    let title = resolution.title().to_string();
+                    let title = named(resolution.title(), warning, several);
                     actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                         title: title.clone(),
                         kind: Some(CodeActionKind::EMPTY),
@@ -104,6 +102,25 @@ pub fn code_actions(
     }
 
     actions
+}
+
+/// The width of the actions in titles that name their warning, so the
+/// names line up: the longest action, "Mark as false positive", and two
+/// spaces.
+const ACTION_WIDTH: usize = 24;
+
+/// The title of an action, with the name of its warning if `with_name`, e.g.
+/// "Mark as fixed           'Buffer Overrun'". Titles name the warning if
+/// there are several in the range to tell apart. Otherwise they stay
+/// short, like "Mark as fixed".
+fn named(action: &str, warning: &Warning, with_name: bool) -> String {
+    match with_name {
+        true => format!(
+            "{action:<ACTION_WIDTH$}'{}'",
+            warning.rule_id.as_deref().unwrap_or("warning")
+        ),
+        false => action.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -170,7 +187,7 @@ mod tests {
         let actions = actions("/ws/src/main.c", 4);
         let open = &actions[2];
 
-        assert_eq!(open.title, "Open LANG.MEM.NPD in CodeSonar Hub");
+        assert_eq!(open.title, "Open in CodeSonar Hub");
         assert!(open.edit.is_none());
 
         let command = open.command.as_ref().unwrap();
@@ -187,7 +204,7 @@ mod tests {
     fn offers_only_explanation_without_fixes_or_hub() {
         let actions = actions("/ws/src/util file.c", 9);
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].title, "Show details for MISC.FMT");
+        assert_eq!(actions[0].title, "Show details            'MISC.FMT'");
         assert!(self::actions("/ws/src/main.c", 0).is_empty());
     }
 
@@ -196,7 +213,7 @@ mod tests {
         let actions = actions("/ws/src/main.c", 4);
         let explain = &actions[1];
 
-        assert_eq!(explain.title, "Show details for LANG.MEM.NPD");
+        assert_eq!(explain.title, "Show details            'LANG.MEM.NPD'");
         assert_eq!(explain.kind, Some(CodeActionKind::EMPTY));
 
         let command = explain.command.as_ref().unwrap();
