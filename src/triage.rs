@@ -106,3 +106,70 @@ fn instance_of(result: &Value) -> Option<u64> {
             hub::warning_instance_id(&Url::parse(uri).ok()?)
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_resolution_of_properties() {
+        assert_eq!(
+            Resolution::of(&json!({"state": "Fixed", "finding": "None"})),
+            Some(Resolution::Fixed)
+        );
+
+        assert_eq!(
+            Resolution::of(&json!({"state": "None", "finding": "False Positive"})),
+            Some(Resolution::FalsePositive)
+        );
+
+        assert_eq!(Resolution::of(&json!({"state": "Assigned"})), None);
+        assert_eq!(Resolution::of(&Value::Null), None);
+    }
+
+    #[test]
+    fn marks_the_warning_in_an_export() {
+        let result = |id: u64| json!({"ruleId": "x", "properties": {"id": {"instanceId": id}, "state": "None"}});
+        let sarif = json!({"runs": [{"results": [result(1), result(2)]}]}).to_string();
+
+        let marked: Value =
+            serde_json::from_str(&mark(&sarif, 2, Resolution::Fixed).unwrap()).unwrap();
+
+        assert_eq!(
+            marked["runs"][0]["results"][0]["properties"]["state"],
+            "None"
+        );
+        assert_eq!(
+            marked["runs"][0]["results"][1]["properties"]["state"],
+            "Fixed"
+        );
+
+        let marked: Value =
+            serde_json::from_str(&mark(&sarif, 1, Resolution::FalsePositive).unwrap()).unwrap();
+
+        assert_eq!(
+            marked["runs"][0]["results"][0]["properties"]["finding"],
+            "False Positive"
+        );
+
+        // Not in the export.
+        assert_eq!(mark(&sarif, 3, Resolution::Fixed), None);
+
+        // Without properties, the link to the hub names the instance.
+        let linked = json!({"runs": [{"results": [
+            {"hostedViewerUri": "https://hub:7340/warninginstance/7.html"},
+        ]}]})
+        .to_string();
+
+        let marked: Value =
+            serde_json::from_str(&mark(&linked, 7, Resolution::Fixed).unwrap()).unwrap();
+
+        assert_eq!(
+            marked["runs"][0]["results"][0]["properties"]["state"],
+            "Fixed"
+        );
+
+        // Not a SARIF export.
+        assert_eq!(mark("{", 1, Resolution::Fixed), None);
+    }
+}

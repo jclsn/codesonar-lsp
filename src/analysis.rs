@@ -407,4 +407,19 @@ mod tests {
         assert_eq!(time("2000-02-29T00:00:00Z"), Some(951_782_400.0));
         assert_eq!(time("yesterday"), None);
     }
+
+    #[test]
+    fn hides_resolved_warnings() {
+        let mut analysis = analysis();
+
+        analysis.resolve(&uri(), "b", Resolution::FalsePositive);
+
+        let shown = analysis.warnings(&uri(), Changed::Hide);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].fingerprint, "a");
+
+        assert_eq!(analysis.len(), 2);
+        assert_eq!(analysis.counts().resolved, 1);
+        assert_eq!(analysis.counts().unverified, 1);
+    }
 }

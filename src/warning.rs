@@ -605,6 +605,21 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_resolution_on_the_hub() {
+        assert!(warnings().iter().all(|w| w.resolution.is_none()));
+
+        let mut log: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        log["runs"][0]["results"][0]["properties"] =
+            serde_json::json!({"state": "Fixed", "finding": "None"});
+        let log = Log::from_json(&log.to_string()).unwrap();
+
+        let warnings = from_log(&log, &config(), Some(Path::new("/ws")));
+
+        assert_eq!(warnings[0].resolution, Some(Resolution::Fixed));
+        assert_eq!(warnings[1].resolution, None);
+    }
+
+    #[test]
     fn marks_warnings_in_changed_code() {
         let warning = Warning {
             status: Status::Changed,

@@ -130,9 +130,13 @@ mod tests {
     }
 
     fn actions(path: &str, line: u32) -> Vec<CodeAction> {
+        actions_of(path, line, true)
+    }
+
+    fn actions_of(path: &str, line: u32, on_hub: bool) -> Vec<CodeAction> {
         let uri = Url::from_file_path(path).unwrap();
         let position = Position::new(line, 4);
-        code_actions(&store(), &uri, Range::new(position, position), true)
+        code_actions(&store(), &uri, Range::new(position, position), on_hub)
             .into_iter()
             .map(|action| match action {
                 CodeActionOrCommand::CodeAction(action) => action,
@@ -201,5 +205,27 @@ mod tests {
         let argument = &command.arguments.as_ref().unwrap()[0];
         assert_eq!(argument["uri"], "file:///ws/src/main.c");
         assert!(argument["fingerprint"].is_string());
+    }
+
+    #[test]
+    fn offers_resolving_on_the_hub() {
+        let actions = actions("/ws/src/main.c", 4);
+
+        let titles: Vec<&str> = actions[3..].iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(titles, ["Mark as fixed", "Mark as false positive",]);
+
+        let command = actions[4].command.as_ref().unwrap();
+        assert_eq!(command.command, RESOLVE_COMMAND);
+
+        let argument = &command.arguments.as_ref().unwrap()[0];
+        assert_eq!(argument["uri"], "file:///ws/src/main.c");
+        assert_eq!(argument["resolution"], "falsePositive");
+        assert!(argument["fingerprint"].is_string());
+
+        assert_eq!(
+            actions_of("/ws/src/main.c", 4, false).len(),
+            3,
+            "not for SARIF files"
+        );
     }
 }

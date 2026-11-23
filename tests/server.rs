@@ -971,6 +971,129 @@ fn deletes_analyses() {
 }
 
 #[test]
+fn resolves_warnings_on_the_hub() {
+    use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+
+    runtime.block_on(async {
+        // The user may change the state, but not the finding.
+        Mock::given(method("POST"))
+            .and(path("/warninginstance/12.json"))
+            .and(body_string_contains("sel_finding="))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(json!({"status": 403, "error": "Permission Denied"})),
+            )
+            .with_priority(1)
+            .mount(&hub)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/warninginstance/12.json"))
+            .and(body_string_contains("sel_state=%22Fixed%22"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": 12})))
+            .with_priority(1)
+            .expect(1)
+            .mount(&hub)
+            .await;
+
+        // The warning after the change.
+        Mock::given(method("GET"))
+            .and(path("/warninginstance/12.json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({"id": 12, "group": {"state": {"id": 3, "label": "Fixed"}}}),
+                ),
+            )
+            .with_priority(1)
+            .mount(&hub)
+            .await;
+    });
+
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    let mut options = hub_options(dir.path(), &hub);
+    options["cacheDir"] = json!(dir.path().join("cache"));
+
+    let mut client = Client::initialize(dir.path(), options);
+    let main = uri(dir.path().join("src/main.c"));
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    // The code actions offer it.
+    let range = json!({"start": {"line": 4, "character": 4}, "end": {"line": 4, "character": 4}});
+    let actions = client.request(
+        "textDocument/codeAction",
+        json!({"textDocument": {"uri": main}, "range": range, "context": {"diagnostics": []}}),
+    );
+
+    let titles: Vec<&str> = actions
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|action| action["title"].as_str())
+        .collect();
+    assert!(titles.contains(&"Mark as fixed"));
+
+    // The user may not change the finding.
+    let refused = client.command(
+        "codesonar.resolve",
+        json!({"uri": main, "range": range, "resolution": "falsePositive"}),
+    );
+
+    assert_eq!(refused["resolved"], 0);
+    assert_eq!(
+        refused["message"],
+        "anonymous hub users may not change warning 12 (Permission Denied)"
+    );
+
+    client.expect("window/showMessage", |p| {
+        p["type"] == 1 && p["message"].as_str().unwrap().contains("may not change")
+    });
+
+    // The user may mark it as fixed.
+    let resolved = client.command(
+        "codesonar.resolve",
+        json!({"uri": main, "range": range, "resolution": "fixed"}),
+    );
+
+    assert_eq!(resolved["resolved"], 1);
+    assert_eq!(
+        resolved["message"],
+        "Marked 'LANG.MEM.NPD' as fixed on the hub"
+    );
+
+    client.expect("window/showMessage", |p| {
+        p["type"] == 3 && p["message"] == "CodeSonar: Marked 'LANG.MEM.NPD' as fixed on the hub"
+    });
+    client.expect("textDocument/publishDiagnostics", |p| {
+        p["uri"] == main && p["diagnostics"] == json!([])
+    });
+
+    let status = client.command("codesonar.status", Value::Null);
+    assert_eq!(status["counts"]["resolved"], 1);
+
+    // Still resolved when loaded from the cache.
+    client.command("codesonar.load", json!({"analysis": 3}));
+
+    let downloads = runtime
+        .block_on(hub.received_requests())
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.path() == "/analysis/3-allwarnings.sarif")
+        .count();
+    assert_eq!(downloads, 1, "loaded from the cache");
+
+    assert_eq!(
+        client.command("codesonar.status", Value::Null)["counts"]["resolved"],
+        1
+    );
+
+    client.shutdown();
+}
+
+#[test]
 fn explains_rules_with_titles_from_the_hub() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
