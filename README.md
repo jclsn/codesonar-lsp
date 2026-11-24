@@ -150,6 +150,12 @@ changed code is detected, see [docs/protocol.md](docs/protocol.md).
 
 ## Other editors
 
+CLion: install the [codesonar-clion] plugin. It starts the server for C and
+C++ files and adds its commands to the IDE as actions, e.g. to choose
+analyses, explain and resolve warnings and run new analyses.
+
+[codesonar-clion]: https://github.com/jclsn/codesonar-clion
+
 Neovim:
 
 ```lua
