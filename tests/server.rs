@@ -343,10 +343,12 @@ fn disables_checks() {
     let conf = std::fs::read_to_string(dir.path().join("codesonar.conf")).unwrap();
     assert!(conf.contains("WARNING_FILTER += discard class=\"LANG.MEM.NPD\""));
 
-    // Enabled again, its warnings are back.
-    client.command(
-        "codesonar.configureAnalysis",
-        json!({"checks": [{"class": "LANG.MEM.NPD", "enabled": true}]}),
+    // Enabled again, its warnings are back. The options it returns need a
+    // CodeSonar installation, which the test does not have.
+    client.respond(
+        "workspace/executeCommand",
+        json!({"command": "codesonar.configureAnalysis",
+               "arguments": [{"checks": [{"class": "LANG.MEM.NPD", "enabled": true}]}]}),
     );
 
     client.expect("textDocument/publishDiagnostics", |p| {
