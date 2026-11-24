@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 
 use crate::store::Store;
 use crate::tracking::Status;
-use crate::warning::{Rule, Warning};
+use crate::warning::{self, Rule, Warning};
 
 /// The parts of an explanation, for clients that render it themselves.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -116,7 +116,9 @@ fn link_list(markdown: &str) -> Option<Vec<Rule>> {
                 id: id.to_string(),
                 title: None,
                 relationship: None,
-                url: Url::parse(rest.strip_suffix(')')?).ok(),
+                url: Url::parse(rest.strip_suffix(')')?)
+                    .ok()
+                    .and_then(warning::web_url),
             })
         })
         .collect::<Option<Vec<_>>>()?;

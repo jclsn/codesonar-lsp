@@ -107,6 +107,13 @@ impl Warning {
     }
 }
 
+/// A link that may be opened in a browser: only `http` and `https`. Links
+/// come from analyses and the hub, and other schemes, like `file`, can
+/// start other programs.
+pub fn web_url(url: Url) -> Option<Url> {
+    matches!(url.scheme(), "http" | "https").then_some(url)
+}
+
 /// Converts all results of a SARIF log into warnings.
 ///
 /// Results whose file cannot be resolved to a local path are skipped.
@@ -177,11 +184,13 @@ impl Resolver<'_> {
             description,
             help_uri: rule
                 .and_then(|rule| rule.help_uri.as_deref())
-                .and_then(|uri| Url::parse(uri).ok()),
+                .and_then(|uri| Url::parse(uri).ok())
+                .and_then(web_url),
             hub_uri: result
                 .hosted_viewer_uri
                 .as_deref()
-                .and_then(|uri| Url::parse(uri).ok()),
+                .and_then(|uri| Url::parse(uri).ok())
+                .and_then(web_url),
             related: result
                 .related_locations
                 .iter()

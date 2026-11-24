@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use crate::config::HubConfig;
 use crate::sarif::Log;
 use crate::triage::Resolution;
-use crate::warning::Rule;
+use crate::warning::{Rule, web_url};
 
 pub struct Hub {
     client: Client,
@@ -232,7 +232,8 @@ impl Hub {
                 relationship: Some(text(category, "relationship")).filter(|r| !r.is_empty()),
                 url: Some(text(category, "url"))
                     .filter(|url| !url.is_empty())
-                    .and_then(|url| self.url(&url).ok()),
+                    .and_then(|url| self.url(&url).ok())
+                    .and_then(web_url),
             })
             .filter(|rule| !rule.id.is_empty())
             .collect())

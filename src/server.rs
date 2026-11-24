@@ -1487,7 +1487,8 @@ impl Backend {
             .first()
             .and_then(Value::as_str)
             .and_then(|uri| Url::parse(uri).ok())
-            .ok_or_else(|| Error::invalid_params("expected a warning URL"))?;
+            .and_then(warning::web_url)
+            .ok_or_else(|| Error::invalid_params("expected the web link of a warning"))?;
 
         self.client
             .show_document(ShowDocumentParams {
