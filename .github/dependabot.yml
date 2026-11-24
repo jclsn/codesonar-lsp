@@ -1,0 +1,27 @@
+# Opens pull requests for new versions of the Rust dependencies and of the
+# actions of the workflows, which are pinned to commits. Updates come once
+# a week, grouped into one pull request per ecosystem; security updates
+# come right away, once they are enabled in the settings of the
+# repository.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dependencies:
+        patterns: ['*']
+    commit-message:
+      prefix: fix
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
