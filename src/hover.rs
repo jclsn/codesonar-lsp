@@ -423,6 +423,19 @@ mod tests {
     }
 
     #[test]
+    fn drops_links_that_are_not_web_links() {
+        let rules = link_list("- [Local](file:///etc/passwd)\n- [CWE:415](https://cwe/415/)\n");
+
+        let urls: Vec<Option<&str>> = rules
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.url.as_ref().map(Url::as_str))
+            .collect();
+        assert_eq!(urls, [None, Some("https://cwe/415/")]);
+    }
+
+    #[test]
     fn keeps_other_descriptions() {
         assert_eq!(link_list("Check pointers **before** use."), None);
         assert_eq!(link_list("- [CWE:415](https://cwe/415/)\nmore"), None);

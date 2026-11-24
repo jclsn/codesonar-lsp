@@ -304,6 +304,14 @@ fn offers_quick_fix_and_opens_hub() {
     );
     assert_eq!(show["params"]["external"], true);
 
+    // Only web links, other schemes can start other programs.
+    let response = client.respond(
+        "workspace/executeCommand",
+        json!({"command": "codesonar.openInHub", "arguments": ["file:///etc/passwd"]}),
+    );
+
+    assert_eq!(response["error"]["code"], -32602, "{response}");
+
     client.shutdown();
 }
 

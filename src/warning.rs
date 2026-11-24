@@ -614,6 +614,23 @@ mod tests {
     }
 
     #[test]
+    fn accepts_only_web_links() {
+        let mut log: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        log["runs"][0]["results"][0]["hostedViewerUri"] = "file:///etc/passwd".into();
+        log["runs"][0]["tool"]["driver"]["rules"][0]["helpUri"] = "javascript:alert(1)".into();
+        let log = Log::from_json(&log.to_string()).unwrap();
+
+        let warnings = from_log(&log, &config(), Some(Path::new("/ws")));
+
+        assert_eq!(warnings[0].hub_uri, None);
+        assert_eq!(warnings[0].help_uri, None);
+
+        assert!(web_url(Url::parse("https://hub:7340/").unwrap()).is_some());
+        assert!(web_url(Url::parse("http://hub:7340/").unwrap()).is_some());
+        assert!(web_url(Url::parse("file:///etc/passwd").unwrap()).is_none());
+    }
+
+    #[test]
     fn reads_the_resolution_on_the_hub() {
         assert!(warnings().iter().all(|w| w.resolution.is_none()));
 
