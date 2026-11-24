@@ -446,6 +446,7 @@ mod tests {
 
         let file = &command.temporary_files[0];
         assert_eq!(std::fs::read_to_string(file).unwrap(), "pw\n");
+        assert_eq!(file.parent(), Some(password_dir().as_path()));
 
         #[cfg(unix)]
         {
