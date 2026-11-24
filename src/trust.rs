@@ -59,3 +59,30 @@ impl Trust {
 fn normalize(address: &str) -> String {
     address.trim().trim_end_matches('/').to_ascii_lowercase()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remembers_trusted_hubs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut trust = Trust::open(dir.path());
+
+        assert!(!trust.contains("hub:7340"));
+
+        trust.add("Hub:7340").unwrap();
+
+        let trust = Trust::open(dir.path());
+        assert!(trust.contains("hub:7340"), "host names ignore case");
+        assert!(!trust.contains("hub:7341"));
+    }
+
+    #[test]
+    fn trusts_none_with_a_damaged_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trusted_hubs.json"), "{").unwrap();
+
+        assert!(!Trust::open(dir.path()).contains("hub:7340"));
+    }
+}

@@ -20,6 +20,8 @@ struct Client {
     /// Notifications and requests received while waiting for something else.
     pending: Vec<Value>,
     next_id: i64,
+    /// The action chosen in questions of the server; none dismisses them.
+    answer: Option<String>,
     _state: tempfile::TempDir,
 }
 
@@ -54,6 +56,7 @@ impl Client {
             messages,
             pending: Vec::new(),
             next_id: 1,
+            answer: None,
             _state: state,
         }
     }
@@ -144,6 +147,10 @@ impl Client {
                 let id = message["id"].clone();
                 let result = match message["method"].as_str() {
                     Some("window/showDocument") => json!({"success": true}),
+                    Some("window/showMessageRequest") => match &self.answer {
+                        Some(title) => json!({"title": title}),
+                        None => Value::Null,
+                    },
                     _ => Value::Null,
                 };
                 self.send(json!({"jsonrpc": "2.0", "id": id, "result": result}));
@@ -1238,6 +1245,133 @@ fn keeps_the_chosen_project_when_the_settings_are_sent_again() {
     let status = client.command("codesonar.status", Value::Null);
     assert_eq!(status["project"], "test");
     assert_eq!(status["presets"], json!(["cert"]));
+
+    client.shutdown();
+}
+
+/// A workspace whose `codesonar.conf` names the mock hub, with settings that
+/// have credentials but no hub, like the setup of the README.
+fn workspace_naming_the_hub(
+    runtime: &tokio::runtime::Runtime,
+    hub: &MockServer,
+) -> (tempfile::TempDir, Value) {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    runtime.block_on(
+        Mock::given(method("POST"))
+            .and(path("/session/create-basic-auth/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"bearer": "token"})))
+            .mount(hub),
+    );
+
+    let dir = workspace_with_source("2100-01-01T00:00:00Z");
+    std::fs::write(
+        dir.path().join("codesonar.conf"),
+        format!("HUB_ADDRESS = {}\n", hub_address(hub)),
+    )
+    .unwrap();
+
+    let options = json!({
+        "hub": {"username": "alice", "password": "secret", "project": "test"},
+        "pathMappings": [{"from": "/build", "to": dir.path()}],
+        "stateDir": dir.path().join("state"),
+    });
+    (dir, options)
+}
+
+/// How often the client signed in to the hub with the credentials.
+fn sign_ins(runtime: &tokio::runtime::Runtime, hub: &MockServer) -> usize {
+    runtime
+        .block_on(hub.received_requests())
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.path() == "/session/create-basic-auth/")
+        .count()
+}
+
+#[test]
+fn asks_before_signing_in_to_the_hub_of_the_workspace() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let (dir, options) = workspace_naming_the_hub(&runtime, &hub);
+
+    let mut client = Client::initialize(dir.path(), options);
+
+    let question = client.expect("window/showMessageRequest", |_| true);
+    assert!(
+        question["message"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("names the hub {}", hub_address(&hub))),
+        "{question}"
+    );
+
+    // Dismissed, the hub is used without the credentials.
+    client.expect("window/showMessage", |p| {
+        p["message"]
+            == format!(
+                "CodeSonar: Using the hub {} without signing in",
+                hub_address(&hub)
+            )
+    });
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    assert_eq!(sign_ins(&runtime, &hub), 0);
+
+    client.shutdown();
+}
+
+#[test]
+fn signs_in_to_a_trusted_hub_of_the_workspace() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let (dir, options) = workspace_naming_the_hub(&runtime, &hub);
+
+    let mut client = Client::initialize(dir.path(), options.clone());
+    client.answer = Some("Sign in".into());
+
+    client.expect("window/showMessageRequest", |_| true);
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    assert_eq!(sign_ins(&runtime, &hub), 1);
+
+    client.shutdown();
+
+    // The trust is remembered, so the next session does not ask.
+    let mut client = Client::initialize(dir.path(), options);
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    assert_eq!(sign_ins(&runtime, &hub), 2);
+    assert!(
+        !client
+            .pending
+            .iter()
+            .any(|message| message["method"] == "window/showMessageRequest"),
+        "asked again"
+    );
+
+    client.shutdown();
+}
+
+#[test]
+fn trusts_the_hub_of_the_settings() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let hub = mock_hub(&runtime, "2100-01-01T00:00:00Z");
+    let (dir, mut options) = workspace_naming_the_hub(&runtime, &hub);
+    options["hub"]["url"] = json!(hub.uri());
+
+    let mut client = Client::initialize(dir.path(), options);
+    client.expect("codesonar/loaded", |p| p["hubId"] == "3");
+
+    assert_eq!(sign_ins(&runtime, &hub), 1);
+    assert!(
+        !client
+            .pending
+            .iter()
+            .any(|message| message["method"] == "window/showMessageRequest"),
+        "asked"
+    );
 
     client.shutdown();
 }
