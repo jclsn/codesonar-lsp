@@ -17,3 +17,7 @@ tower-lsp = "0.20"
 
 [dev-dependencies]
 wiremock = "0.6"
+
+# Smaller binaries for the releases, without debug symbols.
+[profile.release]
+strip = true
