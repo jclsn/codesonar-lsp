@@ -274,11 +274,22 @@ fn description(text: &str) -> Option<String> {
 fn password_file(password: &str) -> anyhow::Result<PathBuf> {
     let mut file = tempfile::Builder::new()
         .prefix("codesonar-password-")
-        .tempfile()
+        .tempfile_in(password_dir())
         .context("cannot create the password file")?;
     writeln!(file, "{password}")?;
     let (_, path) = file.keep()?;
     Ok(path)
+}
+
+/// Where the password file goes: the runtime directory of the user, which
+/// only the user can read and which is cleared when the user logs out, so
+/// that a file left behind by a crash does not stay. Without one, the
+/// temporary directory.
+fn password_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute() && dir.is_dir())
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 fn path(path: &Path) -> String {
