@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::private;
 use crate::tracking::Anchor;
 
 /// Analyses beyond this number are forgotten, least recently used first.
@@ -86,9 +87,9 @@ impl Memory {
     }
 
     fn save(&self) -> anyhow::Result<()> {
+        // It keeps lines of the analyzed code.
         if let Some(dir) = self.file.parent() {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("cannot create {}", dir.display()))?;
+            private::create_dir(dir)?;
         }
 
         std::fs::write(&self.file, serde_json::to_string(&self.data)?)

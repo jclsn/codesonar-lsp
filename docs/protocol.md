@@ -39,8 +39,8 @@ the `analyze` settings keep the shown analysis.
 | `sarifFile`              | SARIF file, absolute or relative to the workspace root. Used without `hub`. |
 | `pathMappings`           | Maps paths from the analysis machine to local paths.            |
 | `changed`                | Warnings in code changed since the analysis: `hide` or `mark` them as hints. |
-| `stateDir`               | Where the analyzed code is remembered. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
-| `cacheDir`               | Where downloaded analyses are kept. Default: `$XDG_CACHE_HOME/codesonar-lsp`. |
+| `stateDir`               | Where the analyzed code is remembered, readable only by you. Default: `$XDG_STATE_HOME/codesonar-lsp`. |
+| `cacheDir`               | Where downloaded analyses are kept, readable only by you. Default: `$XDG_CACHE_HOME/codesonar-lsp`. |
 | `cachedAnalyses`         | How many finished analyses of each hub project are kept downloaded, the most recently shown ones. `0` turns the cache off. Default: `10`. |
 | `analyze.command`        | The CodeSonar command. Default: `codesonar`.                    |
 | `analyze.projectFile`    | Project prefix, relative to the workspace root: CodeSonar names the project files after it, e.g. `<prefix>.conf`. Detected if not set, else `.codesonar/project`. |

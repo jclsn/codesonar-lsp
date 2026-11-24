@@ -11,6 +11,7 @@ pub mod detect;
 pub mod hover;
 pub mod hub;
 pub mod memory;
+pub mod private;
 pub mod progress;
 pub mod sarif;
 pub mod server;

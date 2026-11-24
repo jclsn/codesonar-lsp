@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use anyhow::Context;
 
 use crate::config::Config;
+use crate::private;
 
 /// How many analyses of a project are kept by default.
 pub const DEFAULT_SIZE: usize = 10;
@@ -15,13 +16,19 @@ pub const DEFAULT_SIZE: usize = 10;
 /// The cached analyses of a hub project, the most recently used ones.
 #[derive(Debug, Clone)]
 pub struct Cache {
+    /// The directory of all cached analyses, which only the user may read.
+    root: PathBuf,
     dir: PathBuf,
     size: usize,
 }
 
 impl Cache {
     pub fn new(dir: PathBuf, size: usize) -> Self {
-        Self { dir, size }
+        Self {
+            root: dir.clone(),
+            dir,
+            size,
+        }
     }
 
     /// The cache of the hub project of the settings, if there is one.
@@ -30,10 +37,11 @@ impl Cache {
         let project = hub.project.as_deref()?;
         let root = config.cache_dir.clone().or_else(default_dir)?;
         let size = config.cached_analyses.unwrap_or(DEFAULT_SIZE);
-        Some(Self::new(
-            root.join(name(&hub.url)).join(name(project)),
+        Some(Self {
+            dir: root.join(name(&hub.url)).join(name(project)),
+            root,
             size,
-        ))
+        })
     }
 
     /// The SARIF export of an analysis, if it is cached.
@@ -63,6 +71,7 @@ impl Cache {
             return Ok(());
         }
 
+        private::create_dir(&self.root)?;
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("cannot create {}", self.dir.display()))?;
         // Written completely or not at all, in case the server stops.
