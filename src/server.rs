@@ -990,7 +990,7 @@ impl Backend {
                 enabled: false,
             }],
         };
-        let (disabled, message) = match self.configure_analysis(choice).await {
+        let (disabled, message) = match self.write_choices(choice).await {
             Ok(_) => (
                 true,
                 format!(
@@ -1063,8 +1063,17 @@ impl Backend {
         }))
     }
 
-    /// Writes the presets and checks into the workspace configuration.
+    /// Writes the presets and checks into the workspace configuration and
+    /// returns the options like `codesonar.analysisOptions`.
     async fn configure_analysis(&self, args: ConfigureAnalysisArgs) -> anyhow::Result<Value> {
+        self.write_choices(args).await?;
+        self.analysis_options().await
+    }
+
+    /// Writes the presets and checks into the workspace configuration. It
+    /// needs no CodeSonar installation, which only tells the default of
+    /// checks, so that no rule is written for those.
+    async fn write_choices(&self, args: ConfigureAnalysisArgs) -> anyhow::Result<()> {
         let defaults: Vec<(String, bool)> = {
             let state = self.state.read().await;
             let command = state.effective_config().analyze.command;
@@ -1118,7 +1127,7 @@ impl Backend {
             self.show_again().await;
         }
 
-        self.analysis_options().await
+        Ok(())
     }
 
     /// Removes an analysis from the cache of downloaded analyses.
