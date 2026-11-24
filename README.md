@@ -105,6 +105,11 @@ INCREMENTAL_BUILD = Yes
 outside the section. You can edit the section by hand; everything else in
 the file is left alone.
 
+Any repository can name any hub in `HUB_ADDRESS`. So before the server
+signs in to a hub with your credentials, it asks you, unless it is the hub
+of `hub.url` or one you trusted before. It remembers "Sign in" in its state
+directory; otherwise it uses the hub without signing in.
+
 ## Settings
 
 The settings are the `initializationOptions` of the server. Usually only the

@@ -84,13 +84,19 @@ needs the full rebuild, since CodeSonar only sees what is compiled; later
 ones are incremental and take the rest from their parent.
 
 The section wins over the editor settings: `HUB_ADDRESS` over `hub.url`
-(keeping its scheme and credentials), `project` over `hub.project` and
+(keeping its scheme), `project` over `hub.project` and
 `analyze.project`, `presets`, `build` and `incremental-build` over the
 `analyze` settings. So the editor settings only need the credentials. The
 checks are rules for the warning classes that differ from CodeSonar's
 default; the presets and checks on offer come from the CodeSonar
 installation (`codesonar.analysisOptions`). Lines edited by hand in the
 section are kept, everything outside it is left alone.
+
+The credentials only go to the hub of `hub.url` and to hubs the user
+trusts. Before the server signs in to another hub that `HUB_ADDRESS` names,
+it asks with `window/showMessageRequest` whether to "Sign in". That answer
+is remembered in `trusted_hubs.json` in the state directory; any other
+answer uses the hub without signing in until the server stops.
 
 ## How the project is detected
 

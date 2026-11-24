@@ -1,6 +1,6 @@
 //! The language server.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -32,12 +32,15 @@ use crate::source::{self, Loaded, Selection};
 use crate::store::Store;
 use crate::tracking::Anchor;
 use crate::triage::{self, Resolution};
+use crate::trust::Trust;
 use crate::warning::{self, Rule, Warning};
 use crate::workspace::{CheckRule, WorkspaceConf};
 
 const WATCH_PATTERN: &str = "**/*.sarif";
 /// How often the download progress is reported at most.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+/// The answer that trusts a hub with the credentials.
+const SIGN_IN: &str = "Sign in";
 
 /// The server. Clones share the state, so they can work in background
 /// tasks.
@@ -79,11 +82,17 @@ struct State {
     local: Option<LocalProject>,
     /// The hub project of the workspace, if none is chosen or configured.
     detected_project: Option<String>,
+    /// The hubs that may get the credentials, besides the configured one.
+    trust: Trust,
+    /// The hubs of the workspace configuration that the user did not trust
+    /// with the credentials in this session.
+    declined: HashSet<String>,
 }
 
 impl State {
     /// Sets the settings and the hub client they describe.
     fn configure(&mut self, config: Config) -> anyhow::Result<()> {
+        self.trust = state_dir(&config).map_or_else(Trust::default, |dir| Trust::open(&dir));
         self.config = config;
         self.workspace = match &self.root {
             Some(root) => {
@@ -102,16 +111,43 @@ impl State {
     /// configuration and the settings, with the detected project if there
     /// is no other.
     fn hub_config(&self) -> Option<HubConfig> {
-        let mut hub = self
-            .connected
-            .clone()
-            .or_else(|| self.config.with_workspace(&self.workspace).hub)?;
+        let mut hub = match &self.connected {
+            Some(hub) => hub.clone(),
+            None => {
+                let mut hub = self.config.with_workspace(&self.workspace).hub?;
+
+                // The credentials only go to hubs the user trusts.
+                if self.untrusted_hub().is_some() {
+                    hub.username = None;
+                    hub.password = None;
+                    hub.password_file = None;
+                }
+
+                hub
+            }
+        };
 
         if hub.project.is_none() && hub.analysis_id.is_empty() {
             hub.project = self.detected_project.clone();
         }
 
         Some(hub)
+    }
+
+    /// The hub that only the workspace configuration names, if the user did
+    /// not trust it with the credentials: not the hub of the settings and
+    /// not one trusted before.
+    fn untrusted_hub(&self) -> Option<String> {
+        let address = self.workspace.hub_address.as_deref()?.trim();
+        let configured = self
+            .config
+            .hub
+            .as_ref()
+            .and_then(|hub| hub_address(&hub.url));
+
+        let trusted = configured.is_some_and(|configured| configured.eq_ignore_ascii_case(address))
+            || self.trust.contains(address);
+        (!trusted).then(|| address.to_string())
     }
 
     /// The settings, with the workspace configuration, the chosen hub and
@@ -271,9 +307,14 @@ fn hub_address(url: &str) -> Option<String> {
     (!address.is_empty() && !address.contains('/')).then(|| address.to_string())
 }
 
-fn open_memory(config: &Config) -> Option<Memory> {
+/// The directory of the memory and the trusted hubs.
+fn state_dir(config: &Config) -> Option<PathBuf> {
     let dir = config.state_dir.clone().or_else(memory::default_dir)?;
-    Some(Memory::open(&expand_home(&dir)))
+    Some(expand_home(&dir))
+}
+
+fn open_memory(config: &Config) -> Option<Memory> {
+    Some(Memory::open(&state_dir(config)?))
 }
 
 fn read(uri: &Url) -> Option<String> {
@@ -320,9 +361,73 @@ impl Backend {
         }
     }
 
+    /// Asks the user before the credentials go to a hub that only the
+    /// workspace configuration names, since any repository can name any
+    /// hub there. The answer is remembered: for good if the user trusts
+    /// the hub, else until the server stops.
+    async fn confirm_hub(&self) {
+        let address = {
+            let state = self.state.read().await;
+            let credentials = state
+                .config
+                .hub
+                .as_ref()
+                .is_some_and(|hub| hub.username.is_some());
+
+            match state.untrusted_hub() {
+                Some(address)
+                    if credentials
+                        && state.connected.is_none()
+                        && !state.declined.contains(&address) =>
+                {
+                    address
+                }
+                _ => return,
+            }
+        };
+
+        let action = |title: &str| MessageActionItem {
+            title: title.to_string(),
+            properties: HashMap::new(),
+        };
+        let answer = self
+            .client
+            .show_message_request(
+                MessageType::WARNING,
+                format!(
+                    "CodeSonar: The workspace configuration names the hub {address}. \
+                     Sign in to it with your credentials?"
+                ),
+                Some(vec![action(SIGN_IN), action("Not now")]),
+            )
+            .await;
+        let mut state = self.state.write().await;
+
+        if matches!(&answer, Ok(Some(item)) if item.title == SIGN_IN) {
+            let trusted = state.trust.add(&address);
+            let config = state.config.clone();
+            let configured = state.configure(config);
+            drop(state);
+
+            if let Err(error) = trusted.and(configured) {
+                self.error(format!("{error:#}")).await;
+            }
+        } else {
+            state.declined.insert(address.clone());
+            drop(state);
+            self.client
+                .show_message(
+                    MessageType::INFO,
+                    format!("CodeSonar: Using the hub {address} without signing in"),
+                )
+                .await;
+        }
+    }
+
     /// Loads an analysis and publishes its warnings as diagnostics.
     async fn load(&self, selection: Selection) -> anyhow::Result<()> {
         let _guard = self.reload_lock.lock().await;
+        self.confirm_hub().await;
         self.detect_project().await;
         let (config, root, hub, can_show_progress) = {
             let state = self.state.read().await;
