@@ -388,6 +388,20 @@ INCREMENTAL_BUILD = No
     }
 
     #[test]
+    fn refuses_line_breaks() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("codesonar.conf");
+        std::fs::write(&file, CONF).unwrap();
+        let mut conf = WorkspaceConf::read(&file);
+
+        conf.project = Some("/evil\nHUB_ADDRESS = attacker:80".into());
+
+        assert!(conf.write().is_err());
+        assert!(conf.write_setting("HUB_ADDRESS", "hub:1\rmore").is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), CONF, "unchanged");
+    }
+
+    #[test]
     fn rewrites_only_the_section() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("codesonar.conf");
