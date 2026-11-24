@@ -110,6 +110,9 @@ signs in to a hub with your credentials, it asks you, unless it is the hub
 of `hub.url` or one you trusted before. It remembers "Sign in" in its state
 directory; otherwise it uses the hub without signing in.
 
+An analysis runs the build commands of the section, just as `make` runs a
+Makefile, so only analyze repositories you trust.
+
 ## Settings
 
 The settings are the `initializationOptions` of the server. Usually only the
