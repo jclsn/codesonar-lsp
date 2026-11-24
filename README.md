@@ -18,10 +18,18 @@ CodeSonar hub or from an exported SARIF file.
 
 ## Installation
 
-Download the binary for Linux or Windows from the
-[releases](https://github.com/jclsn/codesonar-lsp/releases) and put it
-into a directory in your `PATH`. The Linux binary is static, so it runs on
-any distribution.
+Download it from the
+[releases](https://github.com/jclsn/codesonar-lsp/releases). The Linux
+binary is static, so its packages install on any release of Debian,
+Ubuntu, RHEL or AlmaLinux:
+
+```sh
+sudo apt install ./codesonar-lsp_0.1.0-1_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./codesonar-lsp-0.1.0-1.x86_64.rpm   # RHEL, AlmaLinux
+```
+
+On other systems, put the binary of the `.tar.gz` (Linux) or the `.zip`
+(Windows) into a directory in your `PATH`.
 
 Or build it yourself:
 
@@ -194,4 +202,6 @@ git push origin v0.1.0
 ```
 
 The release workflow then runs the tests, builds the binaries for Linux
-and Windows and publishes them as a GitHub release with their checksums.
+and Windows and the Debian and RPM packages, installs the packages on old
+and new releases of the distributions, and publishes everything as a
+GitHub release with checksums.

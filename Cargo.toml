@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "Language server for CodeSonar static analysis warnings"
 license = "MIT"
+repository = "https://github.com/jclsn/codesonar-lsp"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1"
@@ -21,3 +23,31 @@ wiremock = "0.6"
 # Smaller binaries for the releases, without debug symbols.
 [profile.release]
 strip = true
+
+# The packages of the releases, made from the static Linux binary, so that
+# they install on any Debian, Ubuntu, RHEL or Alma release: cargo deb and
+# cargo generate-rpm with --target x86_64-unknown-linux-musl.
+[package.metadata.deb]
+maintainer = "Jan Claußen"
+copyright = "2026 Jan Claußen"
+section = "devel"
+priority = "optional"
+# Static, so it needs no libraries.
+depends = ""
+extended-description = """\
+Shows the warnings of CodeSonar analyses in editors that speak the
+Language Server Protocol, from a CodeSonar hub or an exported SARIF file."""
+assets = [
+    ["target/release/codesonar-lsp", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/codesonar-lsp/", "644"],
+    ["LICENSE", "usr/share/doc/codesonar-lsp/", "644"],
+]
+
+[package.metadata.generate-rpm]
+# Static, so it needs no libraries.
+auto-req = "no"
+assets = [
+    { source = "target/release/codesonar-lsp", dest = "/usr/bin/codesonar-lsp", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/codesonar-lsp/README.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/licenses/codesonar-lsp/LICENSE", mode = "644", doc = true },
+]

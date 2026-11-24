@@ -1,5 +1,5 @@
-# Builds codesonar-lsp for Linux and Windows and publishes the binaries as
-# a GitHub release. Runs when a version tag like v0.1.0 is pushed; started
+# Builds codesonar-lsp for Linux and Windows, with Debian and RPM packages,
+# and publishes them as a GitHub release. Runs when a version tag like v0.1.0 is pushed; started
 # by hand from the Actions tab, it only builds, without a release.
 name: Release
 
@@ -87,10 +87,36 @@ jobs:
             tar czf "$name.tar.gz" "$name"
           fi
 
+      # From the static binary, so that one package fits every release of
+      # the distributions; the metadata is in Cargo.toml.
+      - name: Build the Debian and RPM packages
+        if: contains(matrix.target, 'musl')
+        run: |
+          cargo install cargo-deb cargo-generate-rpm --locked
+          cargo deb --no-build --target ${{ matrix.target }} --output ./
+          cargo generate-rpm --target ${{ matrix.target }} --output ./
+
+      # The oldest and newest supported releases; the server ends when its
+      # input does.
+      - name: Install the packages
+        if: contains(matrix.target, 'musl')
+        run: |
+          for image in debian:11 debian:13 ubuntu:20.04 ubuntu:24.04; do
+            docker run --rm -v "$PWD:/pkg" "$image" \
+              sh -c 'dpkg -i /pkg/codesonar-lsp_*.deb && codesonar-lsp < /dev/null'
+          done
+          for image in almalinux:8 almalinux:10; do
+            docker run --rm -v "$PWD:/pkg" "$image" \
+              sh -c 'rpm -i /pkg/codesonar-lsp-*.rpm && codesonar-lsp < /dev/null'
+          done
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.target }}
-          path: codesonar-lsp-*.${{ matrix.archive }}
+          path: |
+            codesonar-lsp-*.${{ matrix.archive }}
+            codesonar-lsp*.deb
+            codesonar-lsp*.rpm
 
   release:
     needs: build
@@ -105,7 +131,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha256sum codesonar-lsp-* > SHA256SUMS
+          sha256sum codesonar-lsp* > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" --generate-notes \
-            codesonar-lsp-* SHA256SUMS
+            codesonar-lsp* SHA256SUMS
