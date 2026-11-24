@@ -20,3 +20,33 @@ pub fn create_dir(dir: &Path) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    fn mode(dir: &Path) -> u32 {
+        std::fs::metadata(dir).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn creates_directories_only_the_user_can_read() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("a/b");
+
+        create_dir(&dir).unwrap();
+
+        assert_eq!(mode(&dir), 0o700);
+
+        // An existing directory is protected as well.
+        let open = root.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        create_dir(&open).unwrap();
+
+        assert_eq!(mode(&open), 0o700);
+    }
+}

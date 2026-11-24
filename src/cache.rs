@@ -204,4 +204,25 @@ mod tests {
             Config::from_value(&serde_json::json!({"hub": {"url": "http://hub"}})).unwrap();
         assert!(Cache::of(&config).is_none(), "without a project");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_the_analyses_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let cache = Cache {
+            root: root.path().join("cache"),
+            dir: root.path().join("cache/hub/project"),
+            size: 2,
+        };
+
+        cache.put("1", "one").unwrap();
+
+        let mode = std::fs::metadata(root.path().join("cache"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
 }

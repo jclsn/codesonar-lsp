@@ -143,6 +143,23 @@ mod tests {
         assert!(memory.anchors("b").is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn keeps_the_memory_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("state");
+        let mut memory = Memory::open(&dir);
+
+        memory
+            .remember("a", [("fp".into(), anchor("x"))].into())
+            .unwrap();
+
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
     #[test]
     fn forgets_least_recently_used_analyses() {
         let dir = tempfile::tempdir().unwrap();
