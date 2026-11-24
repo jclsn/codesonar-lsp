@@ -18,6 +18,13 @@ CodeSonar hub or from an exported SARIF file.
 
 ## Installation
 
+Download the binary for Linux or Windows from the
+[releases](https://github.com/jclsn/codesonar-lsp/releases) and put it
+into a directory in your `PATH`. The Linux binary is static, so it runs on
+any distribution.
+
+Or build it yourself:
+
 ```sh
 cargo install --path .
 ```
@@ -169,3 +176,14 @@ cargo test
 
 The tests of codesonar.vim run against the installed server, so run them
 after `cargo install --path .` as well.
+
+To release a version, set it in `Cargo.toml`, commit, and push a tag
+named after it:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow then runs the tests, builds the binaries for Linux
+and Windows and publishes them as a GitHub release with their checksums.
