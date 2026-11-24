@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 
 const BEGIN: &str = "# BEGIN codesonar-lsp";
 const END: &str = "# END codesonar-lsp";
@@ -177,8 +177,14 @@ impl WorkspaceConf {
     /// the top. Creates the file if it does not exist.
     pub fn write(&self) -> anyhow::Result<()> {
         let file = self.file.as_deref().context("no configuration file")?;
+        let lines = self.lines();
+
+        for line in &lines {
+            one_line(line)?;
+        }
+
         let text = std::fs::read_to_string(file).unwrap_or_default();
-        std::fs::write(file, replace_section(&text, &self.lines()))
+        std::fs::write(file, replace_section(&text, &lines))
             .with_context(|| format!("cannot write {}", file.display()))
     }
 
@@ -187,8 +193,10 @@ impl WorkspaceConf {
     /// section.
     pub fn write_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
         let file = self.file.as_deref().context("no configuration file")?;
-        let text = std::fs::read_to_string(file).unwrap_or_default();
         let line = format!("{key} = {value}");
+        one_line(&line)?;
+
+        let text = std::fs::read_to_string(file).unwrap_or_default();
         let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
         let mut inside = false;
         let mut last = None;
@@ -220,6 +228,17 @@ impl WorkspaceConf {
         std::fs::write(file, lines.join("\n") + "\n")
             .with_context(|| format!("cannot write {}", file.display()))
     }
+}
+
+/// Refuses values with line breaks, which would add lines of their own to
+/// the file, e.g. a hub project name from the hub that adds a
+/// `HUB_ADDRESS`.
+fn one_line(line: &str) -> anyhow::Result<()> {
+    if line.contains(['\n', '\r']) {
+        bail!("line breaks are not allowed in the workspace configuration: {line:?}");
+    }
+
+    Ok(())
 }
 
 /// The lines between the markers of the section.
